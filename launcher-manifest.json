@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "mod_info": {
+    "name": "MinecraftHeadTracking",
+    "version": "0.0.0",
+    "game_id": "minecraft"
+  },
+  "strategy": "Shim",
+  "delivery_mode": "manifest",
+  "files": [
+    {
+      "source": "MinecraftHeadTracking.dll",
+      "target": "MinecraftHeadTracking.dll",
+      "anchor": "mod_home"
+    },
+    {
+      "source": "MinecraftHeadTrackingLauncher.exe",
+      "target": "MinecraftHeadTrackingLauncher.exe",
+      "anchor": "mod_home"
+    }
+  ],
+  "runtime_requirements": [],
+  "dependencies": []
+}

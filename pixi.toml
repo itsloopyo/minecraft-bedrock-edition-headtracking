@@ -1,0 +1,67 @@
+[workspace]
+name = "minecraft-bedrock-edition-headtracking"
+version = "1.0.0"
+description = "Head tracking mod for Minecraft: Bedrock Edition (Windows) using CameraUnlock shared library"
+license = "MIT"
+license-file = "LICENSE"
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[dependencies]
+cmake = ">=3.28"
+python = ">=3.11"
+
+[tasks]
+sync = "git submodule update --remote cameraunlock-core"
+
+# No -G: let CMake pick whichever Visual Studio generator is installed, so a
+# CI image moving from VS 2022 to VS 2026 does not need a pin bumped here.
+#
+# Configure runs on every build rather than only when build/ is absent.
+# MCHT_MOD_VERSION and the git SHA are read from pixi.toml at configure time,
+# so a skipped reconfigure compiles the pre-bump version into the DLL that
+# release.ps1 then packages under the new version number.
+setup = "cmake -B build -A x64"
+
+build = { cmd = "cmake --build build --config Release", depends-on = ["setup"] }
+build-debug = { cmd = "cmake --build build --config Debug", depends-on = ["setup"] }
+
+install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Release", depends-on = ["build"] }
+uninstall = "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1"
+
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build"] }
+release = "powershell -ExecutionPolicy Bypass -File scripts/release.ps1"
+
+# The mod build forces CAMERAUNLOCK_BUILD_TESTS off, so nothing here exercises
+# the submodule. This second configure is the only thing that does, and it is
+# what keeps the tracker-port supervisor honest: the receiver tests hold the
+# port from a second socket, release it, and assert the receiver reclaims it
+# and starts delivering. Without them a regression there is invisible until a
+# user reports tracking that never comes back.
+test-setup = { cmd = """
+    powershell -Command "if (-not (Test-Path 'build-tests')) { cmake -S cameraunlock-core/cpp -B build-tests -A x64 -DCAMERAUNLOCK_BUILD_TESTS=ON } else { Write-Host 'Test build directory exists, skipping setup' -ForegroundColor Yellow }"
+""" }
+test-build = { cmd = "cmake --build build-tests --config Release", depends-on = ["test-setup"] }
+
+# This mod's own suite: the range checks on ini and command-line values, and
+# the matrix composition the camera hook and the crosshair share. Built by the
+# ordinary build, so it needs no second configure.
+test-mod = { cmd = "./build/Release/mcht_tests.exe", depends-on = ["build"] }
+
+test = { cmd = "./build-tests/tests/Release/cameraunlock_tests.exe", depends-on = ["test-build", "test-mod"] }
+
+# No PowerShell variables in here: pixi's task shell expands $name itself, so
+# a "$d" loop reaches powershell.exe with the variable already eaten.
+clean = { cmd = """
+    powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction Ignore build, build-tests, release; Write-Host 'Build artifacts cleaned' -ForegroundColor Green"
+""" }
+
+# This mod vendors no third-party loader. Bedrock cannot host one (see
+# the launcher in this repo takes its place,
+# so update-deps is a no-op kept for parity with the rest of the catalogue.
+update-deps = "powershell -NoProfile -Command \"Write-Host 'No vendored dependencies to update (shim-only mod).'\""
+
+# Print the running game's PE fingerprint as a paste-ready build profile stub.
+# First thing to run when a user reports the dormant log line. Needs Minecraft
+# running, because its on-disk EXE cannot be read.
+check-fingerprint = "python scripts/check_fingerprint.py"

@@ -1,0 +1,43 @@
+build/
+build-tests/
+bin/
+obj/
+dist/
+release/
+scratch/
+.pixi/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+libs/
+*.log
+.headtracking-state.json
+__pycache__/
+*.pyc
+CMakeUserPresets.json
+
+# Reverse-engineering working files. Dumped game images and Ghidra projects
+# embed copyrighted game code and must never be committed.
+*.exe
+*.pdb
+*.gpr
+*.rep/
+*.tsv
+
+# Agent tooling and local lab notes are never tracked here; the authoritative
+# copies live in /c/data/agents and /c/data/skills.
+.claude/
+.claude.json*
+.lab/
+.millhouse/
+AGENTS.md
+CLAUDE.md
+.mcp.json
+mcp.json
+NEXUS_MODS.md
+
+.DS_Store
+Thumbs.db
+desktop.ini
