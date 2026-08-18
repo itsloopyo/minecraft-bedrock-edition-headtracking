@@ -1,6 +1,6 @@
 [workspace]
 name = "minecraft-bedrock-edition-headtracking"
-version = "1.0.0"
+version = "1.0.1"
 description = "Head tracking mod for Minecraft: Bedrock Edition (Windows) using CameraUnlock shared library"
 license = "MIT"
 license-file = "LICENSE"

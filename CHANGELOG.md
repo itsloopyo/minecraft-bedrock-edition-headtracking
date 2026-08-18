@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.1] - 2026-08-18
+
+### Added
+
+- resolve camera addresses at runtime, add build 20260812
+
+### Other
+
+- hello world
+
 ## [Unreleased]
 
 ### Added
