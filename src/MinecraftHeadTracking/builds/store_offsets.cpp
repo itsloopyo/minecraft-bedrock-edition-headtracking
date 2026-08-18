@@ -5,10 +5,15 @@
 // removed, so a player who has held back on an older patch keeps working from
 // the same mod binary as one who updated today.
 //
-// Every address is assigned by name. Positional braces would be shorter, but a
+// What lives here is only what cannot be recovered from the running image:
+// struct field offsets and vtable indices. Every code address is resolved at
+// load time instead (see code_resolver.h), which is why a patch that moves code
+// and leaves the layout alone needs nothing here but a fingerprint.
+//
+// Every value is assigned by name. Positional braces would be shorter, but a
 // table of two dozen bare hex values has no way to say which field a value
-// landed in: one stray comma silently routes an RVA into the neighbouring slot
-// and the mod hooks the wrong function. Naming each one also means a field
+// landed in: one stray comma silently routes an offset into the neighbouring
+// slot and the mod reads the wrong field. Naming each one also means a field
 // added to OffsetTable defaults to 0 in the profiles that have not derived it
 // yet, which the dormancy contract already handles.
 
@@ -17,38 +22,23 @@
 namespace mcht::builds {
 namespace {
 
-// Minecraft for Windows 1.26.4201.0, EXE built 2026-08-06.
+// The 1.26.x layout, shared by every build below that has been verified to
+// carry it. Sharing is deliberate rather than lazy: these are class layouts,
+// and asserting that two builds have the same one is a claim worth making in
+// one place. A build that diverges gets its own function, and the profiles that
+// already point here keep the layout they were verified against.
 //
-// PreRenderUpdate is derived and confirmed: the function at this RVA
-// references both the assert descriptor naming it
-// "virtual void __cdecl LevelRendererPlayer::preRenderUpdate(ScreenContext &,
-// LevelRenderPreRenderUpdateParameters &)" and the profiler zone string
-// "Player - Pre render update".
+// The CameraComponent offsets are confirmed against setupCamera's own code in
+// each build: it reads the quaternion at +0x30, the aspect and field of view at
+// +0x4C and +0x50, and takes the address of the post-view transform at +0x5C.
+// The 0x120 element stride the component getter computes is sizeof of this
+// class, which is the same claim from the other direction.
 //
-// CameraSetup is derived from the call at InGamePlayScreen::_renderLevelPrep
-// +0x30D. Its body reads the ECS CameraComponent (type hash 0x4F6047C7) at
-// +0x30 as a quaternion, expands it to a 3x3 with zero translation, inverts it
-// through the cofactor inverse at 0x005815A0 into the view stack, then applies
-// the component's +0x5C pre-transform through the row-major multiply at
-// 0x0058BE30.
-//
-// The CameraStruct offsets are read straight out of that function's deque
-// access at 0x031AC3F0..0x031AC40C.
-//
-// Every value below is verified against the dumped image rather than carried
-// over from a reference: the vtable slot indices in particular do NOT sit at a
-// constant offset from any published table, so each one is derived from the
-// binary. See docs/reverse-engineering.md.
-constexpr OffsetTable Offsets_20260806() {
+// The vtable slot indices do NOT sit at a constant offset from any published
+// table, so each one is derived from the binary.
+constexpr OffsetTable Layout_1_26() {
     OffsetTable t{};
 
-    t.Camera.PreRenderUpdate = 0x0314C7D0;
-    t.Camera.RenderLevelPrep = 0x004F2E10;
-    t.Camera.CameraRender = 0x03169F70;
-    t.Camera.CameraSetup = 0x031AC390;
-    t.Camera.GetRenderCameraComponent = 0x03023340;
-    t.Camera.HudCursorRender = 0x05A898B0;
-    t.Camera.UiBlit = 0x0186F4B0;
     t.Camera.UiControlSize = 0x48;
 
     t.Renderer.ClientInstance = 0x1168;
@@ -83,10 +73,24 @@ constexpr OffsetTable Offsets_20260806() {
 
 }  // namespace
 
+// Minecraft for Windows 1.26.4201.0, EXE built 2026-08-06.
 extern const BuildProfile kStoreProfile_20260806 = {
     "store-win64-20260806",
     {0x6A750E92, 0x1286D000, 0x125529D1},
-    Offsets_20260806(),
+    Layout_1_26(),
+};
+
+// Minecraft for Windows 1.26.4403.0, EXE built 2026-08-12.
+//
+// Every code address moved - setupCamera 0x031AC390 -> 0x031ACA40, the
+// crosshair renderer 0x05A898B0 -> 0x05A8C020, and so on - and not one of them
+// needed writing down, because the resolver finds them from the running image.
+// The layout is unchanged. That is what a profile looks like now: a
+// fingerprint and a layout it was verified against.
+extern const BuildProfile kStoreProfile_20260812 = {
+    "store-win64-20260812",
+    {0x6A7CA63A, 0x12888000, 0x1256B1FE},
+    Layout_1_26(),
 };
 
 }  // namespace mcht::builds

@@ -1,0 +1,121 @@
+name: MC patch watch
+
+# Polls the Microsoft Store daily for a change to the published Minecraft for
+# Windows package. When it moves, opens an issue with the profile checklist and
+# commits the new signature to .github/mc-last-known-release.txt so the next run
+# only fires on a further change.
+#
+# Bedrock is a Store title, so there is no Steam buildid to poll. What the Store
+# publishes is when the listing last changed and how large the package is, which
+# is a coarser and deliberately more sensitive signal: it can fire on a listing
+# change that did not touch the EXE. That is the right direction to be wrong in.
+# Step 2 of the checklist settles it in one command, and "close this issue,
+# nothing to do" is a normal outcome.
+#
+# This is the "heads up so a release can be ready" channel and never the safety
+# mechanism. builds::SelectProfile is the backstop: an unrecognised fingerprint
+# leaves the mod dormant rather than hooking stale addresses in users' sessions.
+#
+# Note this needs far less work than it used to. The camera addresses are
+# recovered from the running image at load time, so a patch that only moved code
+# needs a fingerprint appended and nothing rederived.
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # daily 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: mc-patch-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Query the Store for the published package signature
+        id: query
+        run: |
+          set -euo pipefail
+          # The script exits non-zero and says why on anything it cannot parse,
+          # which is what stops a broken query looking like "no patch yet".
+          NEW=$(python3 scripts/query_store_release.py)
+          if [[ -z "${NEW:-}" ]]; then
+            echo "::error::query_store_release.py printed nothing."
+            exit 1
+          fi
+          echo "Store signature: $NEW"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+
+      - name: Compare against last-known signature
+        id: compare
+        run: |
+          set -euo pipefail
+          FILE=".github/mc-last-known-release.txt"
+          NEW="${{ steps.query.outputs.new }}"
+          if [[ -f "$FILE" ]]; then
+            OLD=$(tr -d '[:space:]' < "$FILE")
+          else
+            OLD=""
+          fi
+          echo "old=$OLD" >> "$GITHUB_OUTPUT"
+          if [[ "$NEW" == "$OLD" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No change. Signature is still $NEW."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Change detected: '$OLD' -> '$NEW'."
+          fi
+
+      - name: Open issue + record new signature
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NEW="${{ steps.query.outputs.new }}"
+          OLD="${{ steps.compare.outputs.old }}"
+          OLD_DISPLAY=${OLD:-"(none recorded yet)"}
+
+          mkdir -p .github
+          echo "$NEW" > .github/mc-last-known-release.txt
+
+          gh issue create \
+            --title "Minecraft patch detected: $OLD_DISPLAY -> $NEW" \
+            --body "$(cat <<EOF
+          The Microsoft Store listing for [Minecraft for Windows](https://www.microsoft.com/store/productId/9NBLGGH2JHXJ) (\`Microsoft.MinecraftUWP_8wekyb3d8bbwe\`) changed.
+
+          - Previous signature: \`$OLD_DISPLAY\`
+          - New signature:      \`$NEW\`
+
+          The signature is \`lastUpdateDate/downloadBytes\`. It is sensitive by design and can move without the EXE changing, so step 2 decides whether there is any work here at all.
+
+          ## Checklist
+
+          1. Let the Store finish updating Minecraft, then **launch the game** and leave it running. Bedrock's on-disk EXE is unreadable under Store licensing, so the fingerprint is read from the running process.
+          2. \`pixi run check-fingerprint\`. If it prints a fingerprint matching a profile already in \`src/MinecraftHeadTracking/builds/store_offsets.cpp\`, the EXE was not relinked - **close this issue, nothing to do.** Otherwise the EXE changed and needs a profile.
+          3. Install the current mod and launch the game once. The mod stays dormant on an unrecognised build and logs a **paste-ready profile stub** to \`%LOCALAPPDATA%\CameraUnlock\MinecraftHeadTracking\MinecraftHeadTracking.log\`, including the camera addresses it recovered from the running image. Those addresses need no entry - they are resolved at load time.
+          4. If the log says the addresses could NOT be recovered, the resolver's assumptions have moved and this build needs a real look rather than just a profile. Stop here and investigate.
+          5. Confirm the struct layout before reusing \`Layout_1_26()\`. The camera offsets are self-checking (\`setupCamera\` reads them directly and the mod range-checks every field), but **the session vtable indices need real confirmation**: the fairness gate calls through them, and a moved slot means calling an unknown virtual. If any moved, give this build its own layout function rather than editing the shared one.
+          6. Add a NEW \`kStoreProfile_YYYYMMDD\` to \`store_offsets.cpp\` and register it at the **top** of \`kKnownProfiles\` in \`builds/build_registry.cpp\`. Append only: never edit or delete an existing profile, or every user who has not taken this patch loses head tracking with no way back.
+          7. Check the log line \`hudCursorRender=... uiBlit=...\` is non-zero. If it comes back zero the crosshair stays centred while the view moves and head tracking is otherwise unaffected, so it is worth a look but not a blocker.
+          8. Smoke-test **in a loaded world**, not the title screen. The camera hook does not run at the menu, and the fairness gate needs a local player before it reports anything, so a clean log at the menu proves only that the fingerprint matched.
+          9. Bump version and ship via \`pixi run release\`. The CHANGELOG entry is an addition ("adds support for build YYYYMMDD; earlier builds keep working"), not a fix.
+          10. Close this issue once the release is out.
+
+          ---
+          Auto-opened by \`.github/workflows/mc-patch-watch.yml\`.
+          EOF
+          )"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/mc-last-known-release.txt
+          git commit -m "MC patch watch: record store signature $NEW [skip ci]"
+          git push

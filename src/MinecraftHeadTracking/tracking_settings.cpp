@@ -41,31 +41,50 @@ constexpr float kMaxSmoothing = 1.0f;
 // has already shipped once, with pitch and roll inversion.
 float ReadClamped(const cameraunlock::IniReader& config, const char* section, const char* key,
                   float fallback, float lo, float hi) {
-    return cameraunlock::math::SanitizeFinite(config.ReadFloat(section, key, fallback), fallback,
-                                              lo, hi);
+    const float raw = config.ReadFloat(section, key, fallback);
+    const float value = cameraunlock::math::SanitizeFinite(raw, fallback, lo, hi);
+    // Reported, not just substituted. The header promises as much, and without
+    // it a value that does not apply reads exactly like one that does. The
+    // comparison catches NaN too, which is never equal to itself.
+    if (!(value == raw)) {
+        cameraunlock::logging::Line(
+            "[%s] %s is not a usable value; using %.3f. Every float here is validated for "
+            "finiteness and range, which is not the same as being given a minimum.",
+            section, key, value);
+    }
+    return value;
 }
 
-// Warned once per process rather than once per load: config is reloadable, and
-// repeating this on every reload buries it.
+// IniReader has no key-presence query, so an absent key is read as an empty
+// string. A key present but empty carried no setting either, so conflating the
+// two costs nothing.
+bool HasKey(const cameraunlock::IniReader& config, const char* section, const char* key) {
+    return !config.ReadString(section, key, "").empty();
+}
+
+// The single Smoothing key is gone from both sections it used to appear in.
+// Said out loud, once per section that still has it: dropping it in silence
+// leaves the player's tuned value reverting for no stated reason, with the dead
+// line still sitting in their ini arguing that it should have worked.
 //
-// The old value is deliberately NOT migrated into the new keys. The single
-// smoothing value carried a hidden 0.15 floor, so the number in an existing
-// config does not mean what it used to: copying it across would hand a local
-// user smoothing they never chose under the new semantics, and copying it into
-// only one of the two keys would be a guess about which connection they were on.
-void WarnRetiredSmoothingKey(const cameraunlock::IniReader& config, const char* section,
-                             const char* key) {
-    static bool warned = false;
-    if (warned) return;
-    if (config.ReadString(section, key, "").empty()) return;
-    warned = true;
+// Deliberately NOT migrated into the new keys. The old value carried a hidden
+// 0.15 floor, so the number in an existing ini does not mean what it used to:
+// copying it across would hand a local player smoothing they never chose, and
+// copying it into only one of the two would be a guess about which connection
+// they were on.
+void WarnRetiredSmoothingKey(const cameraunlock::IniReader& config, const char* section) {
+    if (!HasKey(config, section, "Smoothing")) {
+        return;
+    }
     cameraunlock::logging::Line(
-        "Config key [%s] %s has been retired and is IGNORED. Smoothing is now two "
-        "keys: LocalSmoothing (default 0, applies to a tracker on this machine) and "
-        "RemoteSmoothing (default 0.15, applies to a tracker on the network). The "
-        "old value is not migrated because the semantics changed - it carried a "
-        "hidden 0.15 floor that no longer exists. Set the two new keys.",
-        section, key);
+        "[%s] Smoothing has been retired and is IGNORED. Smoothing is now two keys in "
+        "[Tracking]: LocalSmoothing (default %.2f, applies to a tracker on this machine) and "
+        "RemoteSmoothing (default %.2f, applies to a tracker on the network). The old value is "
+        "not migrated because the semantics changed - it carried a hidden %.2f floor that no "
+        "longer exists. Set the two new keys.",
+        section, static_cast<double>(cameraunlock::math::kDefaultLocalSmoothing),
+        static_cast<double>(cameraunlock::math::kDefaultRemoteSmoothing),
+        static_cast<double>(cameraunlock::math::kDefaultRemoteSmoothing));
 }
 
 void ReadTracking(const cameraunlock::IniReader& config, Settings& settings) {
@@ -82,12 +101,14 @@ void ReadTracking(const cameraunlock::IniReader& config, Settings& settings) {
     sensitivity.invert_pitch = config.ReadBool("Tracking", "InvertPitch", sensitivity.invert_pitch);
     sensitivity.invert_roll = config.ReadBool("Tracking", "InvertRoll", sensitivity.invert_roll);
 
+    // Each takes its own default as the fallback. Sharing one would turn a
+    // malformed RemoteSmoothing into the LOCAL default, handing a phone player
+    // zero smoothing on raw network jitter and calling it their setting.
     settings.LocalSmoothing = ReadClamped(config, "Tracking", "LocalSmoothing",
                                           settings.LocalSmoothing, kMinSmoothing, kMaxSmoothing);
     settings.RemoteSmoothing = ReadClamped(config, "Tracking", "RemoteSmoothing",
                                            settings.RemoteSmoothing, kMinSmoothing, kMaxSmoothing);
-    WarnRetiredSmoothingKey(config, "Tracking", "Smoothing");
-    WarnRetiredSmoothingKey(config, "Position", "Smoothing");
+    WarnRetiredSmoothingKey(config, "Tracking");
     settings.EnableOnStartup =
         config.ReadBool("Tracking", "EnableOnStartup", settings.EnableOnStartup);
     settings.WorldSpaceYaw = config.ReadBool("Tracking", "WorldSpaceYaw", settings.WorldSpaceYaw);
@@ -112,11 +133,14 @@ void ReadPosition(const cameraunlock::IniReader& config, Settings& settings) {
                                    kMinPositionLimitMetres, kMaxPositionLimitMetres);
     position.limit_z_back = ReadClamped(config, "Position", "LimitZBack", position.limit_z_back,
                                         kMinPositionLimitMetres, kMaxPositionLimitMetres);
-    // No position smoothing key: position uses the same LocalSmoothing /
-    // RemoteSmoothing pair as rotation.
     position.invert_x = config.ReadBool("Position", "InvertX", position.invert_x);
     position.invert_y = config.ReadBool("Position", "InvertY", position.invert_y);
     position.invert_z = config.ReadBool("Position", "InvertZ", position.invert_z);
+
+    // Position has no smoothing key of its own any more: the two [Tracking]
+    // values cover rotation and position together, so the two cannot be tuned
+    // into disagreeing about how much lag the same head movement has.
+    WarnRetiredSmoothingKey(config, "Position");
 
     settings.PositionEnabled = config.ReadBool("Position", "Enabled", settings.PositionEnabled);
 }

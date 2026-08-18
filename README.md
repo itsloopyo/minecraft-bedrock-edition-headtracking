@@ -146,12 +146,15 @@ is `MinecraftHeadTracking.log`.
 ; UDP port the tracker sends OpenTrack packets to.
 Port=4242
 EnableOnStartup=true
-; Smoothing is picked per connection from the packet source address and
-; covers rotation and position alike. 0.0 is none, 1.0 is heavy.
-; LocalSmoothing applies when the tracker runs on this machine
-; (loopback); RemoteSmoothing when it is a device on the network, where
-; the link's jitter is worth filtering.
+; Smoothing, 0.0 (none) to 1.0 (heavy). Which of the two applies is
+; decided per connection from where the packets come from, so both
+; can be set and left alone. Nothing is applied on top of these: 0.0
+; means none. Both cover head rotation and head position alike.
+; LocalSmoothing: the tracker runs on this PC (loopback). Already
+; steady, so smoothing here only costs latency.
 LocalSmoothing=0.0
+; RemoteSmoothing: the tracker is a phone or another PC on the
+; network. Covers the jitter the network adds.
 RemoteSmoothing=0.15
 YawSensitivity=1.0
 PitchSensitivity=1.0
@@ -200,9 +203,14 @@ comes up in whatever the file says.
 Any setting left out of the file takes its default, so a file written by an older
 version keeps working. The travel limits on head position are read from the
 `[Position]` section too, and can be added by hand: `LimitX=0.30`, `LimitY=0.20`,
-`LimitZ=0.40` forward, `LimitZBack=0.10` back, all in meters. There is no
-separate position smoothing key: position uses the same `LocalSmoothing` and
-`RemoteSmoothing` as rotation.
+`LimitZ=0.40` forward, `LimitZBack=0.10` back, all in meters.
+
+`[Position]` has no smoothing key of its own: `LocalSmoothing` and
+`RemoteSmoothing` in `[Tracking]` cover head rotation and head position
+together. The single `Smoothing` key that used to sit in both sections is
+retired and ignored, and is not migrated into the new keys, because it carried a
+hidden 0.15 floor and its number no longer means what it did. The log says so
+once if your file still has it.
 
 Save the file as plain ANSI or UTF-8 without a byte order mark. Notepad adds a
 BOM by default, and Windows then cannot read a single setting in the file. The
@@ -241,13 +249,15 @@ head.
 **Jittery or unstable tracking.** The view shakes or twitches while your head is
 still.
 
-- Raise `LocalSmoothing` (tracker on this PC) or `RemoteSmoothing` (tracker on
-  the network) in `[Tracking]` toward 0.3 and restart the game. Wireless and
-  webcam trackers need more than a headset does.
+- Raise the one that applies to your setup toward 0.3 and restart the game, and
+  leave the other alone: `RemoteSmoothing` in `[Tracking]` for a phone or a
+  second PC, `LocalSmoothing` for a tracker running on this PC. Wireless and
+  webcam trackers need more than a headset does. The log line beginning
+  `Tracker source is` says which of the two is in effect.
 - Improve the lighting for a webcam tracker, or move a phone tracker to a stable
   mount instead of holding it.
-- On a phone app, leave smoothing to the app and keep the mod's `RemoteSmoothing`
-  low, rather than smoothing twice.
+- On a phone app, leave smoothing to the app and keep `RemoteSmoothing` low,
+  rather than smoothing twice.
 
 **Wrong rotation axis.** Nodding rolls the view, or an axis moves the wrong way.
 
@@ -297,10 +307,12 @@ pixi run test        # builds and runs the shared library's test suite; binds lo
 Run the launcher from the deployment folder and check
 `MinecraftHeadTracking.log` beside it.
 
-When a Minecraft update lands, `pixi run check-fingerprint` (with the game
-running) prints the new build's PE fingerprint as a paste-ready build-profile
-stub. Until that profile's addresses are filled in the mod stays dormant and
-the game runs vanilla.
+When a Minecraft update lands the camera addresses are recovered from the
+running game at load time, so a new build usually needs nothing but a build
+profile. `pixi run check-fingerprint` (with the game running) prints the new
+build's PE fingerprint, and the mod's own log prints a paste-ready profile stub
+alongside the addresses it recovered. Until that profile is added the mod stays
+dormant and the game runs vanilla.
 
 ## Community & Support
 

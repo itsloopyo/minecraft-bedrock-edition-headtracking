@@ -6,71 +6,23 @@
 
 namespace mcht::builds {
 
-// Every address this mod pins to a specific Bedrock build lives here, one
-// table per shipped build. Call sites read ActiveProfile().Offsets rather than
-// ever naming a literal, so a game patch is answered by appending a profile
-// instead of editing code.
+// What this mod still pins to a specific Bedrock build: struct field offsets,
+// vtable indices, and the two crosshair addresses that have no name to find
+// them by. Call sites read ActiveProfile().Offsets rather than ever naming a
+// literal, so a layout change is answered by appending a profile instead of
+// editing code.
 //
-// RVAs are relative to Minecraft.Windows.exe's module base.
+// The camera code addresses are NOT here any more. They move on every single
+// patch, because any code edit shifts everything downstream of it, and they are
+// recoverable from the running image by name and by the ECS type hash the
+// camera functions carry - see code_resolver.h. What is left is the half that
+// only moves when a class actually gains or loses a member, which is rare.
+//
+// RVAs are relative to Minecraft.Windows.exe's module base. They are derived
+// from a memory dump of the running game (scripts/dump_running_exe.py) because
+// the on-disk EXE is unreadable under Microsoft Store licensing.
 struct OffsetTable {
     struct CameraGroup {
-        // LevelRendererPlayer::preRenderUpdate(ScreenContext&,
-        // LevelRenderPreRenderUpdateParameters&) - the once-per-frame
-        // render-phase entry point for the player's view. Hooking here is what
-        // lets head rotation reach the view without the game's own aim,
-        // raycast or movement code ever observing it. The shadow camera has
-        // its own separate preRenderUpdate, so this hook cannot disturb the
-        // shadow pass.
-        std::uint32_t PreRenderUpdate;
-
-        // InGamePlayScreen::_renderLevelPrep(ScreenContext&, LevelRenderer&,
-        // Actor&). The frame's camera work happens inside this call, in the
-        // order CameraSetup, shader publish, view-stack push, level build.
-        std::uint32_t RenderLevelPrep;
-
-        // LevelRendererCamera::render(BaseActorRenderContext&,
-        // const ViewRenderObject&, IClientInstance&) - the draw call. It
-        // reloads the camera from ScreenContext+0x18 and calls Camera::update,
-        // which is why anything written to a renderer-side copy of the camera
-        // before this point is discarded.
-        std::uint32_t CameraRender;
-
-        // The camera setup call, InGamePlayScreen::_renderLevelPrep+0x30D.
-        // Signature (LevelRendererPlayer* this, mce::Camera* camera, float).
-        // The third argument is passed but never read by this build. It reads
-        // MinecraftCamera::CameraComponent, expands its quaternion to a 3x3,
-        // inverts it into the camera's view stack and applies the component's
-        // post-view transform.
-        //
-        // This is the seam. It runs before the view and projection are
-        // published to the shader constant block (_renderLevelPrep+0x482),
-        // before the view stack is pushed (+0x557) and before the level build
-        // and frustum cull (+0x104A), so a rotation applied on return reaches
-        // the whole frame - including chunk culling and sort, so nothing pops
-        // at the screen edge. The game's own CameraComponent is never touched,
-        // so aim, raycast and movement keep reading the value the mouse set.
-        std::uint32_t CameraSetup;
-
-        // IClientInstance* -> MinecraftCamera::CameraComponent*, or null. The
-        // game's own getter, so the EnTT registry walk does not have to be
-        // reimplemented; seven call sites across the client keep it honest.
-        // CameraSetup itself reaches the same component by a different route,
-        // so this is an equivalent path to it rather than the one it uses.
-        std::uint32_t GetRenderCameraComponent;
-
-        // HudCursorRenderer::render(MinecraftUIRenderContext&, IClientInstance&,
-        // UIControl& owner, int pass). The crosshair is not positioned by
-        // JSON-UI: this hard-centres it in code as
-        // x = 0.5*screen - 0.5*mSize, ignoring the control's layout position.
-        // Bracketing it is what lets the reticle be moved to the aim point.
-        std::uint32_t HudCursorRender;
-
-        // The UI blit the cursor renderer draws through, taking the rect as
-        // its fourth argument. Offsetting the rect here moves the crosshair
-        // without disturbing anything the renderer computed. Shared with a
-        // cubemap path, so it must only act while inside HudCursorRender.
-        std::uint32_t UiBlit;
-
         // UIControl::mSize (float x, y). The cursor renderer centres with
         // x = (screen - mSize.x) / 2 while the rect it builds carries a
         // hardcoded 16x16, so recovering the screen size needs mSize, not the
@@ -161,14 +113,15 @@ struct BuildProfile {
 
 // A profile can be landed the moment a patch is spotted, carrying only its
 // fingerprint, so the mod recognises the build and says so instead of
-// reporting it as unknown. It stays dormant until the addresses it cannot
-// work without are filled in.
-// The session addresses are required, not optional. Without them the mod
-// cannot tell whether PvP is live, and its failure mode would be head tracking
+// reporting it as unknown. It stays dormant until the layout it cannot work
+// without is filled in.
+//
+// The session offsets are required, not optional. Without them the mod cannot
+// tell whether PvP is live, and its failure mode would be head tracking
 // silently left enabled in a fight - worse than not running at all.
 inline bool ProfileIsComplete(const BuildProfile& profile) {
-    return profile.Offsets.Camera.CameraSetup != 0
-        && profile.Offsets.Camera.GetRenderCameraComponent != 0
+    return profile.Offsets.Renderer.ClientInstance != 0
+        && profile.Offsets.CameraComponent.PostViewTransform != 0
         && profile.Offsets.Session.LevelGetGameRules != 0
         && profile.Offsets.Session.ClientInstanceGetLocalPlayer != 0;
 }

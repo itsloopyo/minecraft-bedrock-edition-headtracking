@@ -23,6 +23,7 @@
 
 namespace mcht::builds {
 extern const BuildProfile kStoreProfile_20260806;
+extern const BuildProfile kStoreProfile_20260812;
 }
 
 namespace {
@@ -196,10 +197,14 @@ void TestSettingsDefaults() {
     // that are absent, and what applies with no ini at all. Pinned here so a
     // change to the shared library's PositionSettings::Default cannot move this
     // mod's behaviour without a test saying so.
+    // Zero, and it stays zero. There is no floor underneath it any more, so a
+    // player on this machine gets the tracker's own latency and nothing added.
     Check(NearEqual(defaults.LocalSmoothing, 0.0f),
-          "settings: a tracker on this machine gets no smoothing by default");
+          "settings: a tracker on this machine gets no smoothing by default, and no floor");
     Check(NearEqual(defaults.RemoteSmoothing, 0.15f),
-          "settings: a tracker on the network gets 0.15 by default");
+          "settings: a tracker on the network gets 0.15 by default, for the jitter it adds");
+    Check(!NearEqual(defaults.LocalSmoothing, defaults.RemoteSmoothing),
+          "settings: the two defaults differ, so the connection check decides something");
     Check(NearEqual(defaults.Position.sensitivity_x, 1.0f) &&
               NearEqual(defaults.Position.sensitivity_y, 1.0f) &&
               NearEqual(defaults.Position.sensitivity_z, 1.0f),
@@ -207,6 +212,12 @@ void TestSettingsDefaults() {
     Check(NearEqual(defaults.Position.limit_x, 0.30f) &&
               NearEqual(defaults.Position.limit_y, 0.20f),
           "settings: the X and Y position limits are the catalogue defaults");
+    // Position carries the same pair as rotation rather than a knob of its own,
+    // so the two pipelines cannot be tuned into disagreeing about how much lag
+    // one head movement has.
+    Check(NearEqual(defaults.Position.local_smoothing, defaults.LocalSmoothing) &&
+              NearEqual(defaults.Position.remote_smoothing, defaults.RemoteSmoothing),
+          "settings: position smoothing is the same pair rotation uses, not a separate setting");
     Check(!defaults.Position.invert_x && !defaults.Position.invert_y && !defaults.Position.invert_z,
           "settings: no position axis is inverted by default");
 }
@@ -591,10 +602,14 @@ void TestMatrixComposition() {
           "matrix: the reversed order does introduce parasitic roll");
 }
 
-// Pins every address the mod hooks or dereferences on the one build it knows.
-// These are derived by hand from a memory dump and are not recoverable from
-// anything else in the tree, so a silent edit is unrecoverable too: the mod
-// would hook the wrong function on a build it claims to support.
+// Pins every offset the mod dereferences on the builds it knows. These are
+// derived by hand from a memory dump and are not recoverable from anything else
+// in the tree, so a silent edit is unrecoverable too: the mod would read the
+// wrong field on a build it claims to support.
+//
+// The camera code addresses are deliberately absent. They are recovered from
+// the running image at load time, so there is nothing here to pin and nothing
+// for a game patch to invalidate.
 void TestBuildProfile() {
     const mcht::builds::BuildProfile& p = mcht::builds::kStoreProfile_20260806;
     const mcht::builds::OffsetTable& o = p.Offsets;
@@ -603,12 +618,8 @@ void TestBuildProfile() {
               p.Fingerprint.CheckSum == 0x125529D1,
           "profile 20260806: the routing fingerprint is unchanged");
 
-    Check(o.Camera.PreRenderUpdate == 0x0314C7D0 && o.Camera.RenderLevelPrep == 0x004F2E10 &&
-              o.Camera.CameraRender == 0x03169F70 && o.Camera.CameraSetup == 0x031AC390 &&
-              o.Camera.GetRenderCameraComponent == 0x03023340 &&
-              o.Camera.HudCursorRender == 0x05A898B0 && o.Camera.UiBlit == 0x0186F4B0 &&
-              o.Camera.UiControlSize == 0x48,
-          "profile 20260806: camera RVAs are unchanged");
+    Check(o.Camera.UiControlSize == 0x48,
+          "profile 20260806: the UI control size offset is unchanged");
 
     Check(o.Renderer.ClientInstance == 0x1168,
           "profile 20260806: the renderer's client-instance offset is unchanged");
@@ -636,12 +647,35 @@ void TestBuildProfile() {
     // The dormancy contract: a profile missing anything the mod cannot work
     // without must not report itself ready to hook.
     Check(mcht::builds::ProfileIsComplete(p),
-          "profile 20260806: carries every address the mod refuses to run without");
+          "profile 20260806: carries every offset the mod refuses to run without");
 
     mcht::builds::BuildProfile placeholder = p;
-    placeholder.Offsets.Camera.CameraSetup = 0;
+    placeholder.Offsets.Session.LevelGetGameRules = 0;
     Check(!mcht::builds::ProfileIsComplete(placeholder),
           "profile: a fingerprint-only placeholder is reported incomplete, so it stays dormant");
+
+    // The 1.26.4403 patch. It moved every camera address and changed no layout,
+    // which is the case the resolver exists to absorb: the profile is a
+    // fingerprint and nothing else, and the two builds share one layout.
+    const mcht::builds::BuildProfile& next = mcht::builds::kStoreProfile_20260812;
+
+    Check(next.Fingerprint.TimeDateStamp == 0x6A7CA63A &&
+              next.Fingerprint.SizeOfImage == 0x12888000 &&
+              next.Fingerprint.CheckSum == 0x1256B1FE,
+          "profile 20260812: the routing fingerprint is unchanged");
+
+    Check(!next.Fingerprint.Matches(p.Fingerprint),
+          "profile 20260812: routes separately from the build before it");
+
+    Check(next.Offsets.Renderer.ClientInstance == o.Renderer.ClientInstance &&
+              next.Offsets.CameraComponent.PostViewTransform ==
+                  o.CameraComponent.PostViewTransform &&
+              next.Offsets.Session.LevelGetGameRules == o.Session.LevelGetGameRules &&
+              next.Offsets.Session.PvpValueByte == o.Session.PvpValueByte,
+          "profile 20260812: shares the 1.26 layout with the build before it");
+
+    Check(mcht::builds::ProfileIsComplete(next),
+          "profile 20260812: carries every offset the mod refuses to run without");
 }
 
 }  // namespace

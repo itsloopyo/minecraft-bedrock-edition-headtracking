@@ -1,5 +1,41 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Support for Minecraft for Windows 1.26.4403.0 (EXE built 2026-08-12). Earlier
+  builds keep working from the same mod binary.
+- Every camera address is now recovered from the running game at load time
+  instead of being pinned per build. Bedrock bakes `__FUNCSIG__` into its own
+  assert strings, so `InGamePlayScreen::_renderLevelPrep` is found by name;
+  `setupCamera` is the first function it calls carrying the EnTT type hash for
+  `MinecraftCamera::CameraComponent`; the component getter is found through the
+  accessor keyed on `RenderCameraComponent`; and the crosshair pair is found by
+  the hardcoded 16x16 rect the cursor renderer blits. A Minecraft patch that
+  only moves code no longer needs anything rederived.
+- An unrecognised build now logs a paste-ready build profile, including the
+  addresses it recovered, so adding support for a new patch is a copy rather
+  than a rederive.
+- A daily patch-watch workflow that polls the Microsoft Store listing and opens
+  an issue with the profile checklist when the published package changes.
+
+### Changed
+
+- Build profiles now carry only struct field offsets and vtable indices. Those
+  move when a class gains or loses a member, which is rare, unlike the code
+  addresses which moved on every single patch. The table of pinned RVAs is gone.
+- Every float read from the ini that fails its range or finiteness check is now
+  named in the log instead of being replaced in silence, and the retired
+  `Smoothing` key is reported once per section that still carries it.
+
+### Fixed
+
+- The call into the game's camera-component getter is now inside a fault
+  boundary, like every other reach into game memory. It was the one call that
+  was not, so a wrong address took the whole session down instead of costing a
+  frame of tracking.
+
 ## [1.0.0] - 2026-08-17
 
 ### Changed

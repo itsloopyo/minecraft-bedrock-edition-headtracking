@@ -5,6 +5,7 @@
 
 #include "cameraunlock/data/position_settings.h"
 #include "cameraunlock/data/tracking_pose.h"
+#include "cameraunlock/math/smoothing_utils.h"
 
 namespace mcht::tracking {
 
@@ -30,10 +31,14 @@ constexpr bool kDefaultInvertRoll = true;
 struct Settings {
     cameraunlock::SensitivitySettings Sensitivity{1.0f, 1.0f, 1.0f, kDefaultInvertYaw,
                                                   kDefaultInvertPitch, kDefaultInvertRoll};
-    // Which of the two applies is decided per connection from the packet
-    // source address, and covers rotation and position alike.
-    float LocalSmoothing = 0.0f;
-    float RemoteSmoothing = 0.15f;
+    // One pair of values covering rotation and position alike. Which of the two
+    // applies is decided per connection from the packet's source address, not
+    // here and not by any call site: a tracker running on this machine needs no
+    // smoothing at all, while one sending over WiFi does, and a player who
+    // switches between them mid-session must get the other value without
+    // restarting the game. There is deliberately no third knob and no floor.
+    float LocalSmoothing = static_cast<float>(cameraunlock::math::kDefaultLocalSmoothing);
+    float RemoteSmoothing = static_cast<float>(cameraunlock::math::kDefaultRemoteSmoothing);
     cameraunlock::PositionSettings Position = cameraunlock::PositionSettings::Default();
     bool EnableOnStartup = true;
     bool PositionEnabled = true;

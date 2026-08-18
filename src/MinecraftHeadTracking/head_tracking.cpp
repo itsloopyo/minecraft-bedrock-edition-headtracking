@@ -13,6 +13,7 @@
 #include "cameraunlock/input/chord_hotkeys.h"
 #include "cameraunlock/input/hotkey_poller.h"
 #include "cameraunlock/logging/file_log.h"
+#include "cameraunlock/math/smoothing_utils.h"
 #include "cameraunlock/processing/pose_interpolator.h"
 #include "cameraunlock/processing/position_interpolator.h"
 #include "cameraunlock/processing/position_processor.h"
@@ -44,6 +45,36 @@ std::int64_t g_lastSampleAt = 0;
 
 FrameClock g_frameClock;
 HeldPose g_held;
+
+// The two configured values, kept so the locality log can name the one that is
+// actually in effect. Which of them applies is never decided here: the
+// processors are told the connection and select it themselves.
+float g_localSmoothing = static_cast<float>(cameraunlock::math::kDefaultLocalSmoothing);
+float g_remoteSmoothing = static_cast<float>(cameraunlock::math::kDefaultRemoteSmoothing);
+
+// The last locality the log reported. Only the render thread touches these, and
+// the line is gated on a change: it is reporting a switch, not a frame.
+bool g_remoteConnection = false;
+bool g_remoteConnectionKnown = false;
+
+// This mod wires the processors by hand rather than through HeadTrackingSession,
+// so there is no kHasRemoteConnection guard to assert: the call below is a
+// direct one, and a receiver that stopped exposing IsRemoteConnection() would
+// fail to compile rather than compile the selection silently away.
+void ApplyConnectionLocality() {
+    const bool isRemote = g_receiver.IsRemoteConnection();
+    g_processor.SetIsRemoteConnection(isRemote);
+    g_positionProcessor.SetIsRemoteConnection(isRemote);
+
+    if (g_remoteConnectionKnown && isRemote == g_remoteConnection) {
+        return;
+    }
+    g_remoteConnection = isRemote;
+    g_remoteConnectionKnown = true;
+    cameraunlock::logging::Line(
+        "Tracker source is %s; smoothing=%.2f.", isRemote ? "a remote device" : "on this machine",
+        cameraunlock::math::GetEffectiveSmoothing(g_localSmoothing, g_remoteSmoothing, isRemote));
+}
 
 // ---------------------------------------------------------------------------
 // What the hotkeys switch.
@@ -215,24 +246,6 @@ cameraunlock::math::Vec3 ProcessPositionOffset(TrackingMode mode, bool havePosit
     return g_positionProcessor.Process(smoothRaw, rotationQuat, delta);
 }
 
-// Fast enough to watch a pose problem develop, slow enough that a session's
-// log stays readable.
-constexpr std::uint64_t kPoseLogIntervalMs = 1000;
-std::uint64_t g_lastPoseLogAt = 0;
-
-void LogPoseAtInterval(const cameraunlock::PositionData& raw,
-                       const cameraunlock::math::Vec3& offset,
-                       const cameraunlock::TrackingPose& pose) {
-    const std::uint64_t nowMs = GetTickCount64();
-    if (nowMs - g_lastPoseLogAt < kPoseLogIntervalMs) {
-        return;
-    }
-    g_lastPoseLogAt = nowMs;
-    cameraunlock::logging::Line(
-        "[pose] raw pos %.3f %.3f %.3f | offset %.3f %.3f %.3f | ypr %.1f %.1f %.1f", raw.x, raw.y,
-        raw.z, offset.x, offset.y, offset.z, pose.yaw, pose.pitch, pose.roll);
-}
-
 // Called on the render thread once per camera setup.
 bool ProvidePose(mcht::camera::Pose& out) {
     const auto now = std::chrono::steady_clock::now();
@@ -248,14 +261,12 @@ bool ProvidePose(mcht::camera::Pose& out) {
         return HoldLastPose(out);
     }
 
-    const float delta = g_frameClock.Advance(now);
-
-    // Read every frame, not once at startup: swapping a local OpenTrack
-    // instance for a phone on WiFi has to pick up the other smoothing
+    // Re-read every frame rather than once at startup. A player who swaps a
+    // local OpenTrack instance for a phone on WiFi has to get the other
     // parameter without restarting the game.
-    const bool isRemoteConnection = g_receiver.IsRemoteConnection();
-    g_processor.SetIsRemoteConnection(isRemoteConnection);
-    g_positionProcessor.SetIsRemoteConnection(isRemoteConnection);
+    ApplyConnectionLocality();
+
+    const float delta = g_frameClock.Advance(now);
 
     // GetPosition already returns metres: the packet parser converts
     // OpenTrack's centimetres on the way in. Scaling again here made a 10cm
@@ -287,8 +298,6 @@ bool ProvidePose(mcht::camera::Pose& out) {
     const cameraunlock::math::Vec3 offset =
         ProcessPositionOffset(mode, havePosition, raw, pose, delta);
 
-    LogPoseAtInterval(raw, offset, pose);
-
     // The processor keeps running while rotation is suppressed, so its
     // smoothing state is current the moment the cycle brings rotation back.
     const bool rotationActive = mode != TrackingMode::PositionOnly;
@@ -305,16 +314,25 @@ bool ProvidePose(mcht::camera::Pose& out) {
 
 void ApplySettings(const Settings& settings) {
     g_processor.SetSensitivity(settings.Sensitivity);
-    // Both smoothing values go in; the per-frame connection locality decides
-    // which one each processor uses.
-    g_processor.SetLocalSmoothing(settings.LocalSmoothing);
-    g_processor.SetRemoteSmoothing(settings.RemoteSmoothing);
 
-    // The position processor takes its pair through PositionSettings; only the
-    // connection flag is runtime state on the processor itself.
+    // One pair for rotation and position alike, pushed to both processors.
+    // Neither this function nor the render path picks between them: they hand
+    // both values over and let the connection decide, so the choice cannot
+    // drift between the two pipelines.
+    g_localSmoothing = settings.LocalSmoothing;
+    g_remoteSmoothing = settings.RemoteSmoothing;
+    g_processor.SetLocalSmoothing(g_localSmoothing);
+    g_processor.SetRemoteSmoothing(g_remoteSmoothing);
+
+    // The pair is copied onto the geometry by name, never rebuilt positionally.
+    // PositionSettings gained a second smoothing field where the single one used
+    // to sit, and its trailing parameters are bools with defaults, so a
+    // positional form still COMPILES with every argument after the smoothing
+    // shifted one along: an inversion flag converts to a float and lands in
+    // RemoteSmoothing, with no diagnostic anywhere.
     cameraunlock::PositionSettings position = settings.Position;
-    position.local_smoothing = settings.LocalSmoothing;
-    position.remote_smoothing = settings.RemoteSmoothing;
+    position.local_smoothing = g_localSmoothing;
+    position.remote_smoothing = g_remoteSmoothing;
     g_positionProcessor.SetSettings(position);
 
     // Off, because we cannot feed it a rotation it can use. The pivot

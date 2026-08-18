@@ -88,6 +88,23 @@ constexpr float kMaxPlausibleCursorPixels = 4096.0f;
 // to centre.
 constexpr float kAimDistanceMetres = 5.0f;
 
+// The getter is an address this mod worked out, not one it was given, so the
+// call into it gets a fault boundary like every other reach into game memory.
+//
+// This is not defensive decoration. An earlier resolver picked a different
+// component accessor - one taking a registry rather than an IClientInstance -
+// and because this call was unguarded it took the whole game down a second
+// after tracking went active, twice. A wrong address should cost a frame of
+// tracking, not the player's session. Its own function because __try cannot
+// share a frame with anything that needs unwinding.
+void* CallCameraComponentGetter(void* clientInstance) {
+    __try {
+        return g_getCameraComponent(clientInstance);
+    } __except (AccessViolationFilter(GetExceptionCode())) {
+        return nullptr;
+    }
+}
+
 void* CameraComponentOf(void* self) {
     const auto bytes = static_cast<unsigned char*>(self);
     const auto slot = bytes + g_offsets->Renderer.ClientInstance;
@@ -102,7 +119,7 @@ void* CameraComponentOf(void* self) {
     if (clientInstance == nullptr) {
         return nullptr;
     }
-    return g_getCameraComponent(clientInstance);
+    return CallCameraComponentGetter(clientInstance);
 }
 
 // Split out so the fault boundaries are explicit and each one has exactly one
@@ -347,13 +364,14 @@ void __fastcall DetourHudCursorRender(void* self, void* uiContext, void* clientI
 
 // Best-effort: the crosshair staying put while the view moves is a cosmetic
 // loss, not a reason to leave the camera unhooked.
-void InstallCrosshairHooks(unsigned char* base,
-                           const mcht::builds::OffsetTable::CameraGroup& camera) {
-    if (camera.HudCursorRender == 0 || camera.UiBlit == 0) {
+void InstallCrosshairHooks(unsigned char* base, const mcht::builds::ResolvedCode& code) {
+    if (code.HudCursorRender == 0 || code.UiBlit == 0) {
+        cameraunlock::logging::Line(
+            "Could not find the crosshair renderer; it will stay centred while the view moves.");
         return;
     }
-    void* const cursorTarget = base + camera.HudCursorRender;
-    void* const blitTarget = base + camera.UiBlit;
+    void* const cursorTarget = base + code.HudCursorRender;
+    void* const blitTarget = base + code.UiBlit;
     const bool hooked =
         MH_CreateHook(cursorTarget, reinterpret_cast<void*>(&DetourHudCursorRender),
                       reinterpret_cast<void**>(&g_originalHudCursorRender)) == MH_OK &&
@@ -369,9 +387,12 @@ void InstallCrosshairHooks(unsigned char* base,
 
 bool Install(PoseProvider provider) {
     const mcht::builds::OffsetTable& offsets = mcht::builds::ActiveProfile().Offsets;
-    if (offsets.Camera.CameraSetup == 0 || offsets.Camera.GetRenderCameraComponent == 0) {
+    // Recovered from the running image rather than pinned to this build, so a
+    // Minecraft patch that only moves code does not reach here at all.
+    const mcht::builds::ResolvedCode& code = mcht::builds::ActiveCode();
+    if (!code.Complete()) {
         cameraunlock::logging::Line(
-            "This build profile has no camera addresses; staying dormant.");
+            "The camera addresses were not recovered; staying dormant.");
         return false;
     }
 
@@ -380,14 +401,14 @@ bool Install(PoseProvider provider) {
 
     const auto base = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr));
     g_getCameraComponent = reinterpret_cast<GetCameraComponentFn>(
-        base + offsets.Camera.GetRenderCameraComponent);
+        base + code.GetRenderCameraComponent);
 
     if (MH_Initialize() != MH_OK) {
         cameraunlock::logging::Line("MinHook failed to initialise; staying dormant.");
         return false;
     }
 
-    void* const setupTarget = base + offsets.Camera.CameraSetup;
+    void* const setupTarget = base + code.CameraSetup;
     if (MH_CreateHook(setupTarget, reinterpret_cast<void*>(&DetourCameraSetup),
                       reinterpret_cast<void**>(&g_originalCameraSetup)) != MH_OK ||
         MH_EnableHook(setupTarget) != MH_OK) {
@@ -397,7 +418,7 @@ bool Install(PoseProvider provider) {
     }
     cameraunlock::logging::Line("Camera hook installed at %p.", setupTarget);
 
-    InstallCrosshairHooks(base, offsets.Camera);
+    InstallCrosshairHooks(base, code);
     return true;
 }
 

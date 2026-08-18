@@ -82,12 +82,15 @@ void WriteDefaultConfig(const std::wstring& path, const std::string& ansiPath) {
     writer.WriteComment(" UDP port the tracker sends OpenTrack packets to.");
     writer.WriteInt("Port", defaults.Port);
     writer.WriteBool("EnableOnStartup", defaults.EnableOnStartup);
-    writer.WriteComment(" Smoothing is picked per connection from the packet source address and");
-    writer.WriteComment(" covers rotation and position alike. 0.0 is none, 1.0 is heavy.");
-    writer.WriteComment(" LocalSmoothing applies when the tracker runs on this machine");
-    writer.WriteComment(" (loopback); RemoteSmoothing when it is a device on the network, where");
-    writer.WriteComment(" the link's jitter is worth filtering.");
+    writer.WriteComment(" Smoothing, 0.0 (none) to 1.0 (heavy). Which of the two applies is");
+    writer.WriteComment(" decided per connection from where the packets come from, so both");
+    writer.WriteComment(" can be set and left alone. Nothing is applied on top of these: 0.0");
+    writer.WriteComment(" means none. Both cover head rotation and head position alike.");
+    writer.WriteComment(" LocalSmoothing: the tracker runs on this PC (loopback). Already");
+    writer.WriteComment(" steady, so smoothing here only costs latency.");
     writer.WriteDouble("LocalSmoothing", defaults.LocalSmoothing);
+    writer.WriteComment(" RemoteSmoothing: the tracker is a phone or another PC on the");
+    writer.WriteComment(" network. Covers the jitter the network adds.");
     writer.WriteDouble("RemoteSmoothing", defaults.RemoteSmoothing);
     writer.WriteDouble("YawSensitivity", defaults.Sensitivity.yaw);
     writer.WriteDouble("PitchSensitivity", defaults.Sensitivity.pitch);
@@ -177,8 +180,12 @@ DWORD WINAPI Bootstrap(LPVOID) {
     // Nothing may touch game memory until a profile is confirmed. An
     // unrecognised build leaves the game running exactly vanilla.
     const mcht::builds::SelectResult result = mcht::builds::SelectProfile();
+    // Incomplete and Unresolved still write the ini below, because the build IS
+    // recognised and the file is what a user edits before the next launch. Only
+    // Matched goes on to install a hook.
     const bool recognised = result == mcht::builds::SelectResult::Matched ||
-                            result == mcht::builds::SelectResult::Incomplete;
+                            result == mcht::builds::SelectResult::Incomplete ||
+                            result == mcht::builds::SelectResult::Unresolved;
     if (!recognised) {
         cameraunlock::logging::Line("Dormant. No hooks installed.");
         return 0;
@@ -199,10 +206,9 @@ DWORD WINAPI Bootstrap(LPVOID) {
     // Checked before discovery, so an underived build stays dormant whatever
     // the ini says. Discovery drives the camera through the ordinary hook, so
     // it needs the same addresses head tracking does.
-    if (result == mcht::builds::SelectResult::Incomplete) {
+    if (result != mcht::builds::SelectResult::Matched) {
         cameraunlock::logging::Line(
-            "Dormant. No hooks installed. This build's camera addresses are not derived yet; "
-            "see docs/reverse-engineering.md.");
+            "Dormant. No hooks installed.");
         return 0;
     }
 
