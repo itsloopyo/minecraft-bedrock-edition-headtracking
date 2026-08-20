@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.0] - 2026-08-20
+
+### Other
+
+- Remove mod-side recentring, the tracker app owns the centre
+
 ## [1.0.1] - 2026-08-18
 
 ### Added
