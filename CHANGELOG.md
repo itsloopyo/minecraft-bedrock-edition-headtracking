@@ -32,6 +32,11 @@
 
 ### Changed
 
+- Removed recentring from the mod, including the `Home` / `Ctrl+Shift+T` hotkey
+  and the handling of a Headcam CENTER press. The tracker app owns the centre,
+  so the mod keeping one of its own put a second centre in series with the
+  tracker's and the two drifted apart. Centre in your tracker app instead
+  (opentrack's Center bind, the CENTER button in Headcam).
 - Build profiles now carry only struct field offsets and vtable indices. Those
   move when a class gains or loses a member, which is rare, unlike the code
   addresses which moved on every single patch. The table of pinned RVAs is gone.

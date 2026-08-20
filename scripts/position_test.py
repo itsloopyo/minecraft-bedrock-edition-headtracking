@@ -48,7 +48,7 @@ def main():
     stream = send_opentrack.PoseStream(ADDRESS)
     stream.start()
 
-    # Centred first, so the auto-recentre lands at the origin.
+    # Centred first, so the smoothing settles before the sweep starts.
     stream.set()
     time.sleep(4.0)
 

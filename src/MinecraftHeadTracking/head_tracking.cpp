@@ -83,7 +83,6 @@ void ApplyConnectionLocality() {
 cameraunlock::input::HotkeyPoller g_hotkeys;
 
 std::atomic<bool> g_enabled{true};
-std::atomic<bool> g_recenterRequested{false};
 
 // What Page Up / Ctrl+Shift+G cycles through, in that order.
 enum class TrackingMode { Both, RotationOnly, PositionOnly };
@@ -121,76 +120,6 @@ const char* TrackingModeName(TrackingMode mode) {
 
 const char* YawModeName(bool worldSpace) {
     return worldSpace ? "world-locked (horizon)" : "camera-local";
-}
-
-// ---------------------------------------------------------------------------
-// Recentring.
-// ---------------------------------------------------------------------------
-
-// Recenter once per session, after the tracker has settled. Never re-armed
-// after a gap: a phone tracker stops sending when it loses the face, and
-// recentring on resume captures whatever pose the user happens to hold.
-int g_freshFrames = 0;
-bool g_autoRecentered = false;
-constexpr int kStabilizationFrames = 10;
-
-void RecenterAll(bool havePosition, const cameraunlock::PositionData& raw) {
-    g_processor.Recenter();
-    if (havePosition) {
-        g_positionProcessor.SetCenter(raw);
-    }
-}
-
-// A recenter the tracker app signalled is not the same operation as the
-// hotkey. The app subtracts the pose at its own end, so everything that
-// arrives from here on is already measured from the new centre and the mod's
-// own centre has to drop to nothing. Anything that latches a sample instead -
-// Recenter(), which folds the smoothed pose in, or centring on the pose that
-// rides the request - subtracts the drift the app has already removed and
-// parks the view mirrored about centre by however far off axis the user was
-// when they pressed.
-//
-// Latching the pose that arrives WITH the request looks correct and is not:
-// the app arms the signal before its own zeroing reaches the wire, so the
-// first packets of the burst still carry the pre-press pose. Whether the
-// request is consumed on one of those or on a zeroed one is a race, which is
-// what made the failure look intermittent.
-void RecenterToTrackerOrigin() {
-    g_processor.RecenterTo(0.0f, 0.0f, 0.0f);
-    g_poseInterpolator.Reset();
-    g_positionProcessor.Reset();
-    g_positionInterpolator.Reset();
-}
-
-// Recentring has to move the position origin too. Without it the tracker's
-// absolute position is treated as an offset from the sensor origin, which the
-// box limits then clamp, so leaning does nothing.
-//
-// Both flags are consumed every frame rather than short-circuited, so a
-// request that loses the tie is dropped rather than firing a second recentre
-// on the frame after.
-void ConsumeRecenterRequests(bool havePosition, const cameraunlock::PositionData& raw) {
-    const bool hotkeyRecenter = g_recenterRequested.exchange(false, std::memory_order_relaxed);
-    const bool remoteRecenter = g_receiver.TryConsumeRecenterRequest();
-    if (remoteRecenter) {
-        RecenterToTrackerOrigin();
-        // The tracker app has centred, so the one automatic recentre this
-        // session has nothing left to do; letting it fire later would fold the
-        // app's centre back in.
-        g_autoRecentered = true;
-        cameraunlock::logging::Line("Recentered by tracker app.");
-    } else if (hotkeyRecenter) {
-        RecenterAll(havePosition, raw);
-    }
-}
-
-void MaybeAutoRecenter(bool havePosition, const cameraunlock::PositionData& raw) {
-    if (g_autoRecentered || ++g_freshFrames < kStabilizationFrames) {
-        return;
-    }
-    RecenterAll(havePosition, raw);
-    g_autoRecentered = true;
-    cameraunlock::logging::Line("Auto-recentered on first tracking data.");
 }
 
 // ---------------------------------------------------------------------------
@@ -277,8 +206,6 @@ bool ProvidePose(mcht::camera::Pose& out) {
     const bool havePosition = g_receiver.GetPosition(px, py, pz);
     const cameraunlock::PositionData raw(px, py, pz);
 
-    ConsumeRecenterRequests(havePosition, raw);
-
     // A sample is "new" when the receiver's timestamp moves; the hook runs far
     // faster than packets arrive, so most frames are interpolated rather than
     // fed a fresh sample.
@@ -291,8 +218,6 @@ bool ProvidePose(mcht::camera::Pose& out) {
 
     const cameraunlock::TrackingPose pose =
         g_processor.Process(smooth.yaw, smooth.pitch, smooth.roll, delta);
-
-    MaybeAutoRecenter(havePosition, raw);
 
     const TrackingMode mode = g_trackingMode.load(std::memory_order_relaxed);
     const cameraunlock::math::Vec3 offset =
@@ -356,10 +281,6 @@ void RegisterHotkeys() {
     using cameraunlock::input::ChordGuarded;
     using cameraunlock::input::NavGuarded;
 
-    const auto recenter = [] {
-        g_recenterRequested.store(true, std::memory_order_relaxed);
-        cameraunlock::logging::Line("Recentered.");
-    };
     const auto toggle = [] {
         const bool now = !g_enabled.load(std::memory_order_relaxed);
         g_enabled.store(now, std::memory_order_relaxed);
@@ -377,13 +298,11 @@ void RegisterHotkeys() {
         cameraunlock::logging::Line("Yaw mode: %s.", YawModeName(now));
     };
 
-    g_hotkeys.AddHotkey(VK_HOME, NavGuarded(recenter));
     g_hotkeys.AddHotkey(VK_END, NavGuarded(toggle));
     g_hotkeys.AddHotkey(VK_PRIOR, NavGuarded(cycleMode));
     g_hotkeys.AddHotkey(g_yawModeKey, NavGuarded(toggleYawMode));
 
     // Chord alternatives for keyboards without a nav cluster.
-    g_hotkeys.AddHotkey('T', ChordGuarded(recenter));
     g_hotkeys.AddHotkey('Y', ChordGuarded(toggle));
     g_hotkeys.AddHotkey('G', ChordGuarded(cycleMode));
     g_hotkeys.AddHotkey('H', ChordGuarded(toggleYawMode));
@@ -427,7 +346,7 @@ bool Start(const std::string& configPath) {
 
     RegisterHotkeys();
     cameraunlock::logging::Line(
-        "Controls: Home / Ctrl+Shift+T recenter, End / Ctrl+Shift+Y toggle tracking, "
+        "Controls: End / Ctrl+Shift+Y toggle tracking, "
         "PageUp / Ctrl+Shift+G cycle tracking mode, PageDown / Ctrl+Shift+H toggle yaw mode.");
     cameraunlock::logging::Line("Yaw mode: %s.", YawModeName(g_worldSpaceYaw.load()));
     return true;

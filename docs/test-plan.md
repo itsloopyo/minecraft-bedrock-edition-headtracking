@@ -113,14 +113,10 @@ From the catalogue doctrine. All four must pass:
 |---|---|---|
 | Loss holds, never snaps | Stop the tracker mid-pose | The view **freezes** where it was. A snap to centre is a failure |
 | Resume blends | Start it again | Smooth return, no jump |
-| Recenter works repeatedly | Press Home, look away, press Home again | Every press centres. The second press failing is the recentring bug returning |
+| Centre follows the tracker | Look away, then centre in the tracker app | The view returns to neutral immediately. The mod keeps no centre of its own, so nothing lags behind the tracker |
 | Toggle | End | Tracking stops and the view eases back to neutral with no residual |
 | Position toggle | PageUp | No jump when toggling |
-| Chords | Ctrl+Shift+T / Y / G | Same three actions |
-
-Recentring is called out because the auto-recentre at startup means a user's
-first manual press is the second recentre of the session, which is exactly the
-case that used to leave a residual.
+| Chords | Ctrl+Shift+Y / G | Same two actions |
 
 ## 8. Stability
 

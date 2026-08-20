@@ -100,8 +100,9 @@ needed. Keep the headset on your head, not on the desk.
 
 Choose `neuralnet tracker` as the OpenTrack input, pick your webcam in its
 options and set the field of view to match the camera. Face a light source, not
-a window behind you. Sit in your normal playing position and press **Start**,
-then use `Home` in game to recenter.
+a window behind you. Sit in your normal playing position and press **Start**. Centre the view with
+OpenTrack's Center bind whenever it drifts; the mod applies the pose the tracker
+sends and keeps no centre of its own.
 
 ### Phone App Setup
 
@@ -119,7 +120,6 @@ keys are quicker; the chords work on keyboards without a nav cluster.
 
 | Action              | Nav-cluster | Chord           |
 |---------------------|-------------|-----------------|
-| Recenter            | `Home`      | `Ctrl+Shift+T`  |
 | Toggle tracking     | `End`       | `Ctrl+Shift+Y`  |
 | Cycle tracking mode | `Page Up`   | `Ctrl+Shift+G`  |
 | Toggle yaw mode     | `Page Down` | `Ctrl+Shift+H`  |
@@ -243,8 +243,9 @@ head.
   dedicated server alike. This is not configurable.
 - Confirm OpenTrack is started and its output is `UDP over network` to
   `127.0.0.1:4242`, matching `Port` in the ini.
-- Press `Home` (or `Ctrl+Shift+T`) to recenter, and `End` (`Ctrl+Shift+Y`) in
-  case tracking was toggled off.
+- Press `End` (`Ctrl+Shift+Y`) in case tracking was toggled off.
+- If the view sits off centre, centre it in the tracker app (OpenTrack's Center
+  bind, the CENTER button in Headcam).
 
 **Jittery or unstable tracking.** The view shakes or twitches while your head is
 still.
