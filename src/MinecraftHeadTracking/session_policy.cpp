@@ -140,6 +140,13 @@ bool CallDisplay(DisplayMessageFn display, void* localPlayer, const std::string*
 // True when the line was handed to the game. False means nothing was shown, so
 // the caller may try again on a later poll.
 bool Tell(void* localPlayer, const char* text) {
+    // The one reach into the game this cannot check before making it: a
+    // three-argument call through a vtable slot the running build was never
+    // verified against. The chat line is a courtesy, the log line carries the
+    // same information, and neither is worth calling an unknown function for.
+    if (!mcht::builds::SessionLayoutVerified()) {
+        return false;
+    }
     const auto& session = Session();
     const auto display =
         VirtualAt<DisplayMessageFn>(localPlayer, session.LocalPlayerDisplayMessage);
@@ -211,7 +218,8 @@ bool ResolveWorld(void* self, WorldHandles& out) {
     if (self == nullptr) {
         return false;
     }
-    void* const clientInstance = MemberPointer(self, offsets.Renderer.ClientInstance);
+    void* const clientInstance =
+        MemberPointer(self, mcht::builds::ActiveLayout().ClientInstance);
     if (clientInstance == nullptr) {
         return false;
     }

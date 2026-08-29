@@ -1,5 +1,43 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Support for Minecraft for Windows 1.26.4501.0 (EXE built 2026-08-29). Earlier
+  builds keep working from the same mod binary.
+- The camera's struct layout is now recovered from the running game as well as
+  its addresses. `setupCamera` is the one function that reads every field the
+  mod touches, so the mod reads it: the client instance is the pointer member
+  loaded out of the renderer and handed to a call, the orientation is the only
+  field read as four consecutive floats, the field of view is the float halved
+  and passed to the tangent and the aspect ratio is the float that tangent's
+  result is scaled by, and the post-view transform is the only field the
+  function takes the address of. Those are the displacements the renderer
+  itself uses, so the mod reads the same bytes it does by construction.
+
+### Changed
+
+- An unrecognised Minecraft build no longer leaves the mod dormant. Nothing
+  about the camera is pinned any more, so a patch that moves or reshapes it is
+  absorbed at load time and head tracking comes up on a build the mod has never
+  seen. It stays dormant only when it cannot find the camera at all, which is
+  the case that would mean hooking stale addresses.
+- A build profile now carries only the PvP gate's offsets, which nothing in the
+  image reads in a form the resolver can follow. On an unrecognised build the
+  gate uses the newest profile's offsets and says so in the log. It still
+  refuses to allow tracking unless every read checks out, and it holds back its
+  in-game chat notice, because that call goes through a vtable slot the running
+  build was never verified against and is the one reach into the game that
+  cannot be checked before it is made.
+- The registry of known builds moved next to the profiles it lists, so
+  answering a patch is one edit in one file.
+
+### Removed
+
+- The pinned `mce::Camera` view-stack offsets. Nothing read them.
+
+
 ## [1.1.0] - 2026-08-20
 
 ### Other

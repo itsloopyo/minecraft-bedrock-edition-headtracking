@@ -177,16 +177,12 @@ DWORD WINAPI Bootstrap(LPVOID) {
     cameraunlock::logging::Open(directory + L"MinecraftHeadTracking.log");
     LogHostEnvironment();
 
-    // Nothing may touch game memory until a profile is confirmed. An
-    // unrecognised build leaves the game running exactly vanilla.
+    // Nothing may touch game memory until the camera has been recovered from
+    // this image. A build it cannot be recovered from leaves the game running
+    // exactly vanilla.
     const mcht::builds::SelectResult result = mcht::builds::SelectProfile();
-    // Incomplete and Unresolved still write the ini below, because the build IS
-    // recognised and the file is what a user edits before the next launch. Only
-    // Matched goes on to install a hook.
-    const bool recognised = result == mcht::builds::SelectResult::Matched ||
-                            result == mcht::builds::SelectResult::Incomplete ||
-                            result == mcht::builds::SelectResult::Unresolved;
-    if (!recognised) {
+    if (result != mcht::builds::SelectResult::Matched &&
+        result != mcht::builds::SelectResult::Adopted) {
         cameraunlock::logging::Line("Dormant. No hooks installed.");
         return 0;
     }
@@ -203,15 +199,6 @@ DWORD WINAPI Bootstrap(LPVOID) {
     if (!config.Open(configPathAnsi)) {
         cameraunlock::logging::Line("Could not open %S; using defaults.", configPath.c_str());
     }
-    // Checked before discovery, so an underived build stays dormant whatever
-    // the ini says. Discovery drives the camera through the ordinary hook, so
-    // it needs the same addresses head tracking does.
-    if (result != mcht::builds::SelectResult::Matched) {
-        cameraunlock::logging::Line(
-            "Dormant. No hooks installed.");
-        return 0;
-    }
-
     if (config.ReadBool("Discovery", "Enabled", false)) {
         cameraunlock::logging::Line("Discovery mode is enabled in MinecraftHeadTracking.ini.");
         mcht::discovery::InstallCalibration(

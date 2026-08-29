@@ -13,12 +13,15 @@ name: MC patch watch
 # nothing to do" is a normal outcome.
 #
 # This is the "heads up so a release can be ready" channel and never the safety
-# mechanism. builds::SelectProfile is the backstop: an unrecognised fingerprint
-# leaves the mod dormant rather than hooking stale addresses in users' sessions.
+# mechanism. builds::SelectProfile is the backstop: a build it cannot recover
+# the camera from leaves the mod dormant rather than hooking stale addresses in
+# users' sessions.
 #
-# Note this needs far less work than it used to. The camera addresses are
-# recovered from the running image at load time, so a patch that only moved code
-# needs a fingerprint appended and nothing rederived.
+# Note this is no longer urgent. Both the camera's addresses and its struct
+# layout are recovered from the running image at load time, so users on the new
+# patch keep tracking without waiting for a release. What a profile adds is the
+# hand-check of the fairness gate's offsets, which nothing in the image reads in
+# a form the resolver can follow.
 
 on:
   schedule:
@@ -100,10 +103,10 @@ jobs:
 
           1. Let the Store finish updating Minecraft, then **launch the game** and leave it running. Bedrock's on-disk EXE is unreadable under Store licensing, so the fingerprint is read from the running process.
           2. \`pixi run check-fingerprint\`. If it prints a fingerprint matching a profile already in \`src/MinecraftHeadTracking/builds/store_offsets.cpp\`, the EXE was not relinked - **close this issue, nothing to do.** Otherwise the EXE changed and needs a profile.
-          3. Install the current mod and launch the game once. The mod stays dormant on an unrecognised build and logs a **paste-ready profile stub** to \`%LOCALAPPDATA%\CameraUnlock\MinecraftHeadTracking\MinecraftHeadTracking.log\`, including the camera addresses it recovered from the running image. Those addresses need no entry - they are resolved at load time.
-          4. If the log says the addresses could NOT be recovered, the resolver's assumptions have moved and this build needs a real look rather than just a profile. Stop here and investigate.
-          5. Confirm the struct layout before reusing \`Layout_1_26()\`. The camera offsets are self-checking (\`setupCamera\` reads them directly and the mod range-checks every field), but **the session vtable indices need real confirmation**: the fairness gate calls through them, and a moved slot means calling an unknown virtual. If any moved, give this build its own layout function rather than editing the shared one.
-          6. Add a NEW \`kStoreProfile_YYYYMMDD\` to \`store_offsets.cpp\` and register it at the **top** of \`kKnownProfiles\` in \`builds/build_registry.cpp\`. Append only: never edit or delete an existing profile, or every user who has not taken this patch loses head tracking with no way back.
+          3. Install the current mod and launch the game once. On an unrecognised build the mod runs anyway, recovering both the camera addresses and the camera layout from the running image, and logs a **paste-ready profile stub** to \`%LOCALAPPDATA%\CameraUnlock\MinecraftHeadTracking\MinecraftHeadTracking.log\`. Neither the addresses nor the layout need an entry - both are resolved at load time.
+          4. If the log says the camera could NOT be recovered, the resolver's assumptions have moved and this build needs a real look rather than just a profile. Users on it are dormant until then, so this is the one branch with any urgency.
+          5. Confirm the fairness gate before reusing \`Layout_1_26()\`. This is the whole job now: **the session vtable indices need real confirmation**, because the gate calls through them and a moved slot means calling an unknown virtual. The \`[session] players=N pvp=... remote=...\` line reading sensibly in a loaded world is what confirms them. If any moved, give this build its own layout function rather than editing the shared one.
+          6. Add a NEW \`kStoreProfile_YYYYMMDD\` to \`store_offsets.cpp\` and register it at the **top** of \`kKnownProfiles\` in that same file. Append only: never edit or delete an existing profile, or every user who has not taken this patch loses head tracking with no way back.
           7. Check the log line \`hudCursorRender=... uiBlit=...\` is non-zero. If it comes back zero the crosshair stays centred while the view moves and head tracking is otherwise unaffected, so it is worth a look but not a blocker.
           8. Smoke-test **in a loaded world**, not the title screen. The camera hook does not run at the menu, and the fairness gate needs a local player before it reports anything, so a clean log at the menu proves only that the fingerprint matched.
           9. Bump version and ship via \`pixi run release\`. The CHANGELOG entry is an addition ("adds support for build YYYYMMDD; earlier builds keep working"), not a fix.

@@ -27,7 +27,8 @@ Set it back to 4242 afterwards, or a real tracker will not be heard.
 |---|---|---|
 | The mod loads | Launch, read `MinecraftHeadTracking.log` | `Activated build profile store-win64-...` |
 | Hooks install | Same log | `Camera hook installed at ...` and `Crosshair follows the aim point.` |
-| Unknown build stays dormant | Edit the profile fingerprint to a wrong value, rebuild, launch | `Dormant. No hooks installed.` and the game plays exactly vanilla |
+| Unknown build still runs | Remove the newest profile from `kKnownProfiles`, rebuild, launch | `No build profile matches this Minecraft.` then `camera layout: ...` and `Camera hook installed`, and tracking works |
+| A camera it cannot find stays dormant | Break the `_renderLevelPrep` signature string in `code_resolver.cpp`, rebuild, launch | `Dormant. No hooks installed.` and the game plays exactly vanilla |
 
 The dormancy check matters more than it looks. The failure mode it prevents is
 head tracking silently active with a fairness gate that cannot read anything.

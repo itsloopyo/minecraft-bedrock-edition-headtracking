@@ -42,10 +42,13 @@ GetCameraComponentFn g_getCameraComponent = nullptr;
 UiBlitFn g_originalUiBlit = nullptr;
 HudCursorRenderFn g_originalHudCursorRender = nullptr;
 
-// Resolved once by Install, from the profile the fingerprint selected. Held as
-// a pointer rather than copied field by field so a new offset cannot reach the
-// table without also reaching the hook.
+// Resolved once by Install. Held as pointers rather than copied field by field
+// so a new offset cannot reach either table without also reaching the hook.
+//
+// The layout is read off the running game's own setupCamera, so these are the
+// displacements the renderer itself uses rather than ones pinned to a build.
 const mcht::builds::OffsetTable* g_offsets = nullptr;
+const mcht::builds::ResolvedLayout* g_layout = nullptr;
 
 // The post-view transform, and so also the buffer the frame's saved copy needs.
 constexpr std::size_t kTransformFloats = 16;
@@ -107,7 +110,7 @@ void* CallCameraComponentGetter(void* clientInstance) {
 
 void* CameraComponentOf(void* self) {
     const auto bytes = static_cast<unsigned char*>(self);
-    const auto slot = bytes + g_offsets->Renderer.ClientInstance;
+    const auto slot = bytes + g_layout->ClientInstance;
     // IsReadable, not IsBadReadPtr: the latter probes by touching the memory,
     // so a hit on a guard page consumes it, and on a thread stack that breaks
     // the growth mechanism for the rest of the process. On the render path, a
@@ -125,7 +128,7 @@ void* CameraComponentOf(void* self) {
 // Split out so the fault boundaries are explicit and each one has exactly one
 // meaning. Both are free of C++ objects, which __try requires.
 bool ReadCameraState(const unsigned char* fields, float orientationOut[4]) {
-    const auto& component = g_offsets->CameraComponent;
+    const auto& component = *g_layout;
     float aspect = 0.0f;
     float fov = 0.0f;
     __try {
@@ -233,7 +236,7 @@ float* ApplyPoseToCamera(void* self, const mcht::camera::Pose& pose, float* save
 
     const auto fields = static_cast<unsigned char*>(component);
     float* const postView =
-        reinterpret_cast<float*>(fields + g_offsets->CameraComponent.PostViewTransform);
+        reinterpret_cast<float*>(fields + g_layout->PostViewTransform);
     float orientation[4];
     float worldUp[3] = {};
 
@@ -398,6 +401,7 @@ bool Install(PoseProvider provider) {
 
     g_provider = provider;
     g_offsets = &offsets;
+    g_layout = &mcht::builds::ActiveLayout();
 
     const auto base = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr));
     g_getCameraComponent = reinterpret_cast<GetCameraComponentFn>(

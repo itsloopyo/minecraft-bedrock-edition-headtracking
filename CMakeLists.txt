@@ -111,6 +111,7 @@ add_library(${MOD_NAME} SHARED
     src/MinecraftHeadTracking/builds/store_offsets.cpp
     src/MinecraftHeadTracking/builds/image_scan.cpp
     src/MinecraftHeadTracking/builds/code_resolver.cpp
+    src/MinecraftHeadTracking/builds/layout_resolver.cpp
 )
 
 target_include_directories(${MOD_NAME} PRIVATE src src/MinecraftHeadTracking)

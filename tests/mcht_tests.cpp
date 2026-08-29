@@ -24,6 +24,7 @@
 namespace mcht::builds {
 extern const BuildProfile kStoreProfile_20260806;
 extern const BuildProfile kStoreProfile_20260812;
+extern const BuildProfile kStoreProfile_20260829;
 }
 
 namespace {
@@ -602,14 +603,14 @@ void TestMatrixComposition() {
           "matrix: the reversed order does introduce parasitic roll");
 }
 
-// Pins every offset the mod dereferences on the builds it knows. These are
+// Pins every offset the mod still dereferences from a profile. These are
 // derived by hand from a memory dump and are not recoverable from anything else
 // in the tree, so a silent edit is unrecoverable too: the mod would read the
 // wrong field on a build it claims to support.
 //
-// The camera code addresses are deliberately absent. They are recovered from
-// the running image at load time, so there is nothing here to pin and nothing
-// for a game patch to invalidate.
+// Neither the camera's addresses nor its struct layout are here. Both are
+// recovered from the running image at load time, so there is nothing to pin and
+// nothing for a game patch to invalidate.
 void TestBuildProfile() {
     const mcht::builds::BuildProfile& p = mcht::builds::kStoreProfile_20260806;
     const mcht::builds::OffsetTable& o = p.Offsets;
@@ -621,14 +622,6 @@ void TestBuildProfile() {
     Check(o.Camera.UiControlSize == 0x48,
           "profile 20260806: the UI control size offset is unchanged");
 
-    Check(o.Renderer.ClientInstance == 0x1168,
-          "profile 20260806: the renderer's client-instance offset is unchanged");
-
-    Check(o.CameraComponent.Orientation == 0x30 && o.CameraComponent.AspectRatio == 0x4C &&
-              o.CameraComponent.FieldOfView == 0x50 &&
-              o.CameraComponent.PostViewTransform == 0x5C,
-          "profile 20260806: camera-component member offsets are unchanged");
-
     Check(o.Session.ClientInstanceGetLevel == 0x538 &&
               o.Session.ClientInstanceGetLocalPlayer == 0x0F8 &&
               o.Session.ClientInstanceIsMultiPlayer == 0x560 &&
@@ -639,20 +632,15 @@ void TestBuildProfile() {
               o.Session.PvpRuleIndex == 15 && o.Session.LocalPlayerDisplayMessage == 0x630,
           "profile 20260806: the fairness gate's offsets are unchanged");
 
-    Check(o.CameraStruct.ViewStackMap == 0x08 && o.CameraStruct.ViewStackMapSize == 0x10 &&
-              o.CameraStruct.ViewStackOffset == 0x18 && o.CameraStruct.ViewStackSize == 0x20 &&
-              o.CameraStruct.ViewStackDirty == 0x38,
-          "profile 20260806: mce::Camera view-stack offsets are unchanged");
-
-    // The dormancy contract: a profile missing anything the mod cannot work
-    // without must not report itself ready to hook.
+    // A profile missing the fairness offsets must not report itself usable as
+    // the source of them, or an unrecognised build would adopt an empty table.
     Check(mcht::builds::ProfileIsComplete(p),
           "profile 20260806: carries every offset the mod refuses to run without");
 
     mcht::builds::BuildProfile placeholder = p;
     placeholder.Offsets.Session.LevelGetGameRules = 0;
     Check(!mcht::builds::ProfileIsComplete(placeholder),
-          "profile: a fingerprint-only placeholder is reported incomplete, so it stays dormant");
+          "profile: a fingerprint-only placeholder is not offered as a source of offsets");
 
     // The 1.26.4403 patch. It moved every camera address and changed no layout,
     // which is the case the resolver exists to absorb: the profile is a
@@ -667,15 +655,37 @@ void TestBuildProfile() {
     Check(!next.Fingerprint.Matches(p.Fingerprint),
           "profile 20260812: routes separately from the build before it");
 
-    Check(next.Offsets.Renderer.ClientInstance == o.Renderer.ClientInstance &&
-              next.Offsets.CameraComponent.PostViewTransform ==
-                  o.CameraComponent.PostViewTransform &&
+    Check(next.Offsets.Camera.UiControlSize == o.Camera.UiControlSize &&
               next.Offsets.Session.LevelGetGameRules == o.Session.LevelGetGameRules &&
               next.Offsets.Session.PvpValueByte == o.Session.PvpValueByte,
           "profile 20260812: shares the 1.26 layout with the build before it");
 
     Check(mcht::builds::ProfileIsComplete(next),
           "profile 20260812: carries every offset the mod refuses to run without");
+
+    // The 1.26.4501 patch, and the first the mod ran on before it was written
+    // down: every camera address AND the camera layout were recovered from the
+    // running image, so all this profile adds is that the fairness offsets were
+    // confirmed against it.
+    const mcht::builds::BuildProfile& latest = mcht::builds::kStoreProfile_20260829;
+
+    Check(latest.Fingerprint.TimeDateStamp == 0x6A8378BA &&
+              latest.Fingerprint.SizeOfImage == 0x12888000 &&
+              latest.Fingerprint.CheckSum == 0x12568F46,
+          "profile 20260829: the routing fingerprint is unchanged");
+
+    Check(!latest.Fingerprint.Matches(next.Fingerprint) &&
+              !latest.Fingerprint.Matches(p.Fingerprint),
+          "profile 20260829: routes separately from every build before it");
+
+    Check(mcht::builds::ProfileIsComplete(latest),
+          "profile 20260829: carries every offset the mod refuses to run without");
+
+    // The diagnostic primary, and the profile an unrecognised build takes its
+    // fairness offsets from, so it has to be the newest one that names them.
+    Check(mcht::builds::kKnownProfileCount == 3 &&
+              mcht::builds::kKnownProfiles[0] == &latest,
+          "registry: the newest profile leads, so an unknown build adopts its offsets");
 }
 
 }  // namespace

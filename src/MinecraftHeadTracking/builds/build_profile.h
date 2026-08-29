@@ -1,26 +1,30 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "cameraunlock/memory/pe_fingerprint.h"
 
 namespace mcht::builds {
 
-// What this mod still pins to a specific Bedrock build: struct field offsets,
-// vtable indices, and the two crosshair addresses that have no name to find
-// them by. Call sites read ActiveProfile().Offsets rather than ever naming a
-// literal, so a layout change is answered by appending a profile instead of
-// editing code.
+// What this mod still pins to a specific Bedrock build: the fairness gate's
+// struct offsets and vtable indices, and the cursor control's size. Call sites
+// read ActiveProfile().Offsets rather than ever naming a literal, so a layout
+// change is answered by appending a profile instead of editing code.
 //
-// The camera code addresses are NOT here any more. They move on every single
-// patch, because any code edit shifts everything downstream of it, and they are
-// recoverable from the running image by name and by the ECS type hash the
-// camera functions carry - see code_resolver.h. What is left is the half that
-// only moves when a class actually gains or loses a member, which is rare.
+// Neither the camera's code addresses nor its struct layout are here any more.
+// The addresses are found by name and by the ECS type hash the camera
+// functions carry (code_resolver.h); the layout is read off setupCamera's own
+// code (layout_resolver.h). Both are recovered from the running image at load
+// time, so a Minecraft patch that moves the camera needs nothing appended.
 //
-// RVAs are relative to Minecraft.Windows.exe's module base. They are derived
-// from a memory dump of the running game (scripts/dump_running_exe.py) because
-// the on-disk EXE is unreadable under Microsoft Store licensing.
+// What is left is what no code in the image reads in a form this can follow:
+// the fairness gate reaches its values through virtual dispatch and member
+// walks that no single function performs.
+//
+// Those offsets are derived from a memory dump of the running game
+// (scratch/dump_running_exe.py) because the on-disk EXE is unreadable under
+// Microsoft Store licensing.
 struct OffsetTable {
     struct CameraGroup {
         // UIControl::mSize (float x, y). The cursor renderer centres with
@@ -29,34 +33,6 @@ struct OffsetTable {
         // rect's own width.
         std::uint32_t UiControlSize;
     } Camera;
-
-    // Within LevelRendererPlayer, CameraSetup's `this`.
-    struct RendererGroup {
-        std::uint32_t ClientInstance;
-    } Renderer;
-
-    // Within MinecraftCamera::CameraComponent (sizeof 0x120). Cross-checked
-    // against LeviLamina's MIT headers for 1.26.x.
-    struct CameraComponentGroup {
-        // The camera pose. Rewritten every frame by the camera systems, and
-        // read by non-render consumers, so head tracking must not go here.
-        std::uint32_t Orientation;
-
-        // Read fresh each frame to build the projection, so they are also the
-        // values the reticle projection must use.
-        std::uint32_t AspectRatio;
-        std::uint32_t FieldOfView;
-
-        // Applied to the view matrix as V_final = PostViewTransform * V, so it
-        // acts in view space: the doctrine's headRot * gameViewMatrix, in a
-        // slot the engine already provides. Render-only.
-        //
-        // An ECS system resets it from an identity matrix and may then apply
-        // its own rotations, but it early-outs on some frames, so a write here
-        // must compose against the value found and restore it afterwards
-        // rather than accumulate.
-        std::uint32_t PostViewTransform;
-    } CameraComponent;
 
     // What the mod needs to answer "could head tracking give an unfair
     // advantage right now". Head tracking decouples looking from aiming, which
@@ -89,18 +65,6 @@ struct OffsetTable {
         // packet and is invisible to other players.
         std::uint32_t LocalPlayerDisplayMessage;
     } Session;
-
-    // Offsets within mce::Camera, reached as ScreenContext+0x18 and handed to
-    // CameraSetup as its second argument. The matrix stacks are MSVC
-    // std::deque<Matrix4> with block size 1, so the live matrix is
-    // map[(off + size - 1) & (mapsize - 1)].
-    struct CameraStructGroup {
-        std::uint32_t ViewStackMap;      // deque _Map
-        std::uint32_t ViewStackMapSize;  // deque _Mapsize
-        std::uint32_t ViewStackOffset;   // deque _Myoff
-        std::uint32_t ViewStackSize;     // deque _Mysize
-        std::uint32_t ViewStackDirty;    // recompute flag for the derived cache
-    } CameraStruct;
 };
 
 struct BuildProfile {
@@ -111,19 +75,25 @@ struct BuildProfile {
     OffsetTable Offsets;
 };
 
-// A profile can be landed the moment a patch is spotted, carrying only its
-// fingerprint, so the mod recognises the build and says so instead of
-// reporting it as unknown. It stays dormant until the layout it cannot work
-// without is filled in.
+// Whether a profile can serve as the fairness gate's layout. A profile can be
+// landed the moment a patch is spotted, carrying only its fingerprint, to
+// record that the build was seen; one in that state names no offsets and so
+// cannot be the source of them.
 //
 // The session offsets are required, not optional. Without them the mod cannot
 // tell whether PvP is live, and its failure mode would be head tracking
 // silently left enabled in a fight - worse than not running at all.
 inline bool ProfileIsComplete(const BuildProfile& profile) {
-    return profile.Offsets.Renderer.ClientInstance != 0
-        && profile.Offsets.CameraComponent.PostViewTransform != 0
-        && profile.Offsets.Session.LevelGetGameRules != 0
+    return profile.Offsets.Session.LevelGetGameRules != 0
         && profile.Offsets.Session.ClientInstanceGetLocalPlayer != 0;
 }
+
+// Append-only, newest build first. The top entry is the diagnostic primary
+// that words the "newer than / older than" line, and the profile an
+// unrecognised build takes its fairness offsets from. Declared beside the
+// profiles rather than beside the selection logic so that answering a patch is
+// one edit in one file.
+extern const BuildProfile* const kKnownProfiles[];
+extern const std::size_t kKnownProfileCount;
 
 }  // namespace mcht::builds

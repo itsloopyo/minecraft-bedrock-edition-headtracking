@@ -1,39 +1,43 @@
 #pragma once
 
-#include <cstddef>
-
 #include "build_profile.h"
 #include "code_resolver.h"
+#include "layout_resolver.h"
 
 namespace mcht::builds {
 
 // Result of preparing the running Minecraft.Windows.exe for hooking.
 enum class SelectResult {
-    Matched,     // Layout profile matched and the camera addresses were recovered.
-    Incomplete,  // Fingerprint matched, but this build's layout is not derived yet.
-    Unresolved,  // Layout matched, but the camera addresses could not be recovered.
-    Unknown,     // No profile matched.
+    Matched,     // A profile's fingerprint matched this exact build.
+    Adopted,     // No profile matched, but the camera was recovered anyway.
+    Unresolved,  // The camera could not be recovered from this image.
     ReadFailed,  // Could not read the module's PE headers.
 };
 
-// Append-only. Newest build first: the top entry is the diagnostic primary
-// that words the "newer than / older than" line when nothing matches.
-extern const BuildProfile* const kKnownProfiles[];
-extern const std::size_t kKnownProfileCount;
-
-// Fingerprint the running game, pick its layout profile, and recover the camera
-// addresses from the image. Runs before a single hook is installed. Anything
-// but Matched leaves the mod fully dormant: no hooks and no writes, so an
-// unrecognised build runs exactly vanilla.
+// Fingerprint the running game, recover the camera from the image, and pick
+// the fairness gate's layout. Runs before a single hook is installed.
+//
+// Matched and Adopted both go on to hook; the rest leave the mod fully
+// dormant, so a build the camera cannot be recovered from runs exactly vanilla.
 SelectResult SelectProfile();
 
-// Valid after SelectProfile() returned Matched or Incomplete. On Incomplete
-// only the offsets that are actually derived are populated, and nothing but
-// the discovery tooling may act on it.
+// The fairness gate's layout. Valid after SelectProfile() returned Matched or
+// Adopted. On Adopted these offsets come from the newest profile rather than
+// from one verified against the running build - see SessionLayoutVerified.
 const BuildProfile& ActiveProfile();
 
+// False when the fairness offsets were carried over from an older build rather
+// than verified against this one. The gate still refuses to allow tracking
+// unless every read validates; what this gates is the calls that cannot be
+// validated before they are made.
+bool SessionLayoutVerified();
+
 // The camera addresses recovered from the running image. Valid only after
-// SelectProfile() returned Matched.
+// SelectProfile() returned Matched or Adopted.
 const ResolvedCode& ActiveCode();
+
+// The camera's struct layout, read off setupCamera's own code. Valid only
+// after SelectProfile() returned Matched or Adopted.
+const ResolvedLayout& ActiveLayout();
 
 }  // namespace mcht::builds
