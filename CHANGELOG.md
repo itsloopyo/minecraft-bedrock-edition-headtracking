@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.2] - 2026-08-29
+
+### Added
+
+- recover the camera layout from the running image, add build 20260829
+
 ## [1.1.1] - 2026-08-29
 
 ### Added
