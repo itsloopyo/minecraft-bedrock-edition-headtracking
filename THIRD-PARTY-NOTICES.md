@@ -12,7 +12,7 @@ Minecraft: Bedrock Edition.
 | Component | Version | Licence | How it ships |
 |-----------|---------|---------|--------------|
 | MinHook | `9fbd08743270` | BSD-2-Clause | Compiled into `MinecraftHeadTracking.dll` |
-| cameraunlock-core | c5e76c94037a11b6dab40f8a2e286ca824819be3 | MIT | Compiled into `MinecraftHeadTracking.dll` |
+| cameraunlock-core | 1fd2956b1819137f723a552725462ab25c14fa24 | MIT | Compiled into `MinecraftHeadTracking.dll` |
 | OpenTrack | n/a | ISC | Not bundled; UDP protocol interoperability only |
 
 ---
@@ -119,7 +119,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Git submodule at `cameraunlock-core/`, compiled into `MinecraftHeadTracking.dll`. Our own code,
 MIT licensed, reproduced here so the notices are complete.
 
-- Pinned commit: `c5e76c94037a11b6dab40f8a2e286ca824819be3`
+- Pinned commit: `1fd2956b1819137f723a552725462ab25c14fa24`
 
 ```
 MIT License
