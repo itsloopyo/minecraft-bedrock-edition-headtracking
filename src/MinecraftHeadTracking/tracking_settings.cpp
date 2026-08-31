@@ -129,6 +129,11 @@ void ReadPosition(const cameraunlock::IniReader& config, Settings& settings) {
                                    kMinPositionLimitMetres, kMaxPositionLimitMetres);
     position.limit_y = ReadClamped(config, "Position", "LimitY", position.limit_y,
                                    kMinPositionLimitMetres, kMaxPositionLimitMetres);
+    // The clamp is [-limit_y_down, +limit_y] and limit_y_down carries its own
+    // default, so mirror the one configured vertical limit the way
+    // PositionSettings::Symmetric does. Left unset, raising LimitY widened the
+    // upward budget only and downward travel stayed pinned at 0.20m.
+    position.limit_y_down = position.limit_y;
     position.limit_z = ReadClamped(config, "Position", "LimitZ", position.limit_z,
                                    kMinPositionLimitMetres, kMaxPositionLimitMetres);
     position.limit_z_back = ReadClamped(config, "Position", "LimitZBack", position.limit_z_back,
