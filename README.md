@@ -12,6 +12,7 @@ headset needed.
   targets the block you mine and build on
 - **6DOF positional tracking** - lean and peek to shift the viewpoint, on top of
   yaw, pitch and roll
+- **Works with any OpenTrack compatible tracker** - free options available for PC, iOS and Android
 - **Off in PvP** - disables itself when the `pvp` game rule is on and another
   player is in the session
 
