@@ -25,16 +25,12 @@ headset needed.
 
 ## Installation
 
-**Pre-release.** There is no published release yet. The steps below describe the
-release ZIP as it will ship; until then, [build from
-source](#building-from-source).
+### Lopari
 
-The easiest route is [Lopari](https://lopari.app), which installs and starts
-the mod for you: it finds your Store copy of Minecraft by package identity,
-keeps the mod in its own folder under `%APPDATA%\Lopari\mods\minecraft`, and
-launches the game through it. Nothing goes into the game folder either way.
+Download [Lopari](https://lopari.app), choose **Minecraft: Bedrock Edition**, and click
+**Play with head tracking**.
 
-To install by hand instead:
+### Standalone Launcher
 
 1. Download `MinecraftHeadTracking-v<version>-installer.zip` from the
    [Releases page](https://github.com/itsloopyo/minecraft-bedrock-edition-headtracking/releases).
