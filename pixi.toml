@@ -12,6 +12,7 @@ cmake = ">=3.28"
 python = ">=3.11"
 
 [tasks]
+update-submodule = "git submodule update --remote cameraunlock-core && powershell -NoProfile -ExecutionPolicy Bypass -File cameraunlock-core/scripts/update-submodule.ps1"
 sync = "git submodule update --remote cameraunlock-core"
 
 # No -G: let CMake pick whichever Visual Studio generator is installed, so a
