@@ -18,7 +18,7 @@ headset needed.
 ## Requirements
 
 - [Minecraft for Windows (Bedrock Edition)](https://apps.microsoft.com/detail/9nblggh2jhxj)
-  from the Microsoft Store or the Xbox app
+  from the Microsoft Store
 - A tracking source: [OpenTrack](https://github.com/opentrack/opentrack) with a
   webcam or VR headset, or a phone app such as [Headcam](https://headcam.app)
 - Windows 10 version 1903 or newer, x64
@@ -219,7 +219,7 @@ launcher, or it stops after the first few lines.
 
 - Run the launcher, not the Minecraft shortcut. Started any other way, the game
   runs completely vanilla.
-- Minecraft has to be the Microsoft Store or Xbox app build of Minecraft for
+- Minecraft has to be the Microsoft Store build of Minecraft for
   Windows. Java Edition is a different game and is not supported.
 - After a Minecraft update the log says the running build is not recognised.
   The mod keeps working: it finds the camera in the running game rather than
