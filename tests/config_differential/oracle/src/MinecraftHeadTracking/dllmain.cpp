@@ -8,16 +8,54 @@
 #include "common/module_path.h"
 #include "discovery.h"
 #include "head_tracking.h"
-#include "legacy_config/legacy_config.h"
 #include "tracking_settings.h"
 
 namespace {
 
 HMODULE g_self = nullptr;
 
-// Written into the ini this mod creates. The frozen reader's default is the
-// same 40.
+// Written into the ini and used when the ini does not answer, so the two
+// cannot drift into a file whose stated default is not the one that applies.
 constexpr int kDefaultDiscoverySeconds = 40;
+
+// A path in the encoding the ini APIs actually decode.
+//
+// IniReader and IniWriter take a narrow path and hand it to
+// GetPrivateProfileStringA and fopen, both of which decode it with the process
+// ANSI code page. Encoding it as UTF-8 sent every path holding a non-ASCII
+// character - any localised Windows user name, since these files live under
+// %LOCALAPPDATA% - to a different file name, so the ini was written and read
+// somewhere nothing else looked and every setting silently reverted.
+//
+// A character the code page cannot represent is substituted rather than
+// reported, so the result is round-tripped: a path that does not come back
+// identical does not name the file we asked for, and saying so beats a
+// mystery "using defaults" line.
+std::string AnsiPath(const std::wstring& text) {
+    if (text.empty()) {
+        return {};
+    }
+    const int size = WideCharToMultiByte(CP_ACP, 0, text.c_str(), static_cast<int>(text.size()),
+                                         nullptr, 0, nullptr, nullptr);
+    if (size <= 0) {
+        return {};
+    }
+    std::string out(static_cast<std::size_t>(size), '\0');
+    WideCharToMultiByte(CP_ACP, 0, text.c_str(), static_cast<int>(text.size()), out.data(), size,
+                        nullptr, nullptr);
+
+    const int back = MultiByteToWideChar(CP_ACP, 0, out.c_str(), size, nullptr, 0);
+    std::wstring verify(static_cast<std::size_t>(back > 0 ? back : 0), L'\0');
+    if (back <= 0 ||
+        MultiByteToWideChar(CP_ACP, 0, out.c_str(), size, verify.data(), back) <= 0 ||
+        verify != text) {
+        cameraunlock::logging::Line(
+            "WARNING: %S contains characters this system's ANSI code page cannot represent, so "
+            "the settings file cannot be read or written there and built-in defaults apply.",
+            text.c_str());
+    }
+    return out;
+}
 
 // Written once, so the discovery switch is discoverable without reading the
 // source. Never overwrites an existing file.
@@ -94,6 +132,28 @@ void WriteDefaultConfig(const std::wstring& path, const std::string& ansiPath) {
     writer.WriteInt("DurationSeconds", kDefaultDiscoverySeconds);
 }
 
+// Windows INI parsing is byte-oriented and a UTF-8 BOM ends up glued to the
+// first section header, so every setting silently reverts to its default.
+// Notepad writes that BOM by default, so say so rather than ignoring the file.
+void WarnIfByteOrderMarked(const std::wstring& path) {
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    unsigned char bom[3] = {0, 0, 0};
+    DWORD read = 0;
+    ReadFile(file, bom, sizeof(bom), &read, nullptr);
+    CloseHandle(file);
+
+    if (read == sizeof(bom) && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) {
+        cameraunlock::logging::Line(
+            "WARNING: MinecraftHeadTracking.ini starts with a UTF-8 byte order mark, so Windows "
+            "cannot read any setting in it and all defaults apply. Re-save it as plain ANSI or "
+            "UTF-8 without BOM, or delete it and let it be recreated.");
+    }
+}
+
 // What a bug report needs before anything else: which mod build is running,
 // in which process, against which image.
 void LogHostEnvironment() {
@@ -131,18 +191,22 @@ DWORD WINAPI Bootstrap(LPVOID) {
     // Converted once: writing the file, probing it here and reading it in
     // Start must all name the same bytes, and the conversion is where that can
     // stop being true.
-    const std::string configPathAnsi = mcht::legacy::AnsiPath(configPath);
+    const std::string configPathAnsi = AnsiPath(configPath);
     WriteDefaultConfig(configPath, configPathAnsi);
+    WarnIfByteOrderMarked(configPath);
 
-    mcht::legacy::Config config;
-    config.Read(configPath, configPathAnsi);
-    if (config.discovery_enabled) {
+    cameraunlock::IniReader config;
+    if (!config.Open(configPathAnsi)) {
+        cameraunlock::logging::Line("Could not open %S; using defaults.", configPath.c_str());
+    }
+    if (config.ReadBool("Discovery", "Enabled", false)) {
         cameraunlock::logging::Line("Discovery mode is enabled in MinecraftHeadTracking.ini.");
-        mcht::discovery::InstallCalibration(config.discovery_seconds);
+        mcht::discovery::InstallCalibration(
+            config.ReadInt("Discovery", "DurationSeconds", kDefaultDiscoverySeconds));
         return 0;
     }
 
-    mcht::tracking::Start(mcht::tracking::FromLegacy(config));
+    mcht::tracking::Start(configPathAnsi);
     return 0;
 }
 

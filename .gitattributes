@@ -1,3 +1,8 @@
 * text=auto eol=lf
 *.cmd text eol=crlf
 *.bat text eol=crlf
+
+# The config differential test's inputs and its verbatim copies of published
+# sources are compared byte for byte, so git must not touch their line endings.
+tests/config_differential/data/** -text
+tests/config_differential/oracle/** -text

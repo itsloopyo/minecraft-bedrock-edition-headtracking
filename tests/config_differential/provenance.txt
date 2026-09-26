@@ -1,0 +1,46 @@
+# What the config differential test compiles, and where each file came from.
+# scripts/check-provenance.ps1 (part of pixi run test) fails when a listed file no longer
+# has its hash.
+#
+# Newest published build: v1.1.2 at ccc3ba5, pinned to cameraunlock-core 1fd2956. Earlier
+# published builds: v1.1.0, v1.0.1, v1.0.0, v0.1.1, v0.1.0 and the dev tag. None shipped a
+# config in its ZIP or a launcher seed; each wrote MinecraftHeadTracking.ini on its first run.
+#
+# Oracle: copies of 'git show v1.1.2:<path>' and of cameraunlock-core
+# 'git show 1fd2956:cpp/<path>'.
+9b0fb477daff9ae4a1199b7868ea6cfeb5b8f5e9faa93503bea6e0dc02568243  tests/config_differential/oracle/src/MinecraftHeadTracking/dllmain.cpp  v1.1.2:src/MinecraftHeadTracking/dllmain.cpp
+6c7cd564e6f8c41614e29bf2e62e982abefc591721bbe9f1f0b5c254599accfb  tests/config_differential/oracle/src/MinecraftHeadTracking/tracking_settings.cpp  v1.1.2:src/MinecraftHeadTracking/tracking_settings.cpp
+d0be2e236f48b9a4339f87d5e2b18b2cd01087f47dfcc1805dd89f19830c8490  tests/config_differential/oracle/src/MinecraftHeadTracking/tracking_settings.h  v1.1.2:src/MinecraftHeadTracking/tracking_settings.h
+961b7cd692f995d6576f2ef4423ccf102340d607f17a1fd2677388332a638cc7  tests/config_differential/oracle/src/MinecraftHeadTracking/discovery.h  v1.1.2:src/MinecraftHeadTracking/discovery.h
+56091673a20e9b5570376785cf29fbb181df8a0479191f1dbf28fe0837b98502  tests/config_differential/oracle/src/MinecraftHeadTracking/head_tracking.h  v1.1.2:src/MinecraftHeadTracking/head_tracking.h
+2857f3ec915acab4fd09affc259557342ee320b42b9ca0cad0ac325cac6abc9f  tests/config_differential/oracle/src/common/bounds.h  v1.1.2:src/common/bounds.h
+a7ffb44210ff59672fa97e8e5feaa2cb3e81938fcc0334a384c68bc371b3857a  tests/config_differential/oracle/core/include/cameraunlock/config/ini_reader.h  core 1fd2956:cpp/include/cameraunlock/config/ini_reader.h
+ccd022e0f63bfe6cde243f2769b803bfa7d0ead6f77118874fa6c57961021a89  tests/config_differential/oracle/core/include/cameraunlock/data/position_settings.h  core 1fd2956:cpp/include/cameraunlock/data/position_settings.h
+7cdb1ad02461e4cf37d3f2e2f9eedde12a9ed3238a61f8906302596589d2f629  tests/config_differential/oracle/core/include/cameraunlock/data/tracking_pose.h  core 1fd2956:cpp/include/cameraunlock/data/tracking_pose.h
+de519d9b49c949353c550b9dda347380cbbf131f6768378f8a9f5fd97678fea8  tests/config_differential/oracle/core/include/cameraunlock/input/chord_hotkeys.h  core 1fd2956:cpp/include/cameraunlock/input/chord_hotkeys.h
+43bdd2ef8554c78e5f440333463750c13b95110fe672b0b6e273244df9e7d169  tests/config_differential/oracle/core/include/cameraunlock/logging/file_log.h  core 1fd2956:cpp/include/cameraunlock/logging/file_log.h
+d7a905270933e3cb0c4c361d29d3fd701655498cbcd1875ea79d180468bdbe6a  tests/config_differential/oracle/core/include/cameraunlock/math/angle_utils.h  core 1fd2956:cpp/include/cameraunlock/math/angle_utils.h
+c59772d698d54ade3374ee1221b74f5563a86d76f0eb34a989ef7efab389c0ad  tests/config_differential/oracle/core/include/cameraunlock/math/finite_utils.h  core 1fd2956:cpp/include/cameraunlock/math/finite_utils.h
+fc2146f8c585e5f610c7234e302f59de4945679cfa28ff479ca47477ec073f22  tests/config_differential/oracle/core/include/cameraunlock/math/smoothing_utils.h  core 1fd2956:cpp/include/cameraunlock/math/smoothing_utils.h
+0dc7e23ae364dc12216604070a52f60811bb18e35f591d38b4ecdd0a655eb627  tests/config_differential/oracle/core/include/cameraunlock/protocol/socket_types.h  core 1fd2956:cpp/include/cameraunlock/protocol/socket_types.h
+fc7cc79943103264b9964bb77625f7ee3d848bcc634fbf1181cb8c54faca17db  tests/config_differential/oracle/core/include/cameraunlock/protocol/udp_receiver.h  core 1fd2956:cpp/include/cameraunlock/protocol/udp_receiver.h
+e3b07fba03de6942c4e6eec696dcd08f3931849994edb46fc297dc5ee479df34  tests/config_differential/oracle/core/include/cameraunlock/protocol/udp_socket.h  core 1fd2956:cpp/include/cameraunlock/protocol/udp_socket.h
+e01515c2656aaf533bae4350dc45b702c3e3d4043935743dcc9bd5ea581fbe1c  tests/config_differential/oracle/core/src/config/ini_reader.cpp  core 1fd2956:cpp/src/config/ini_reader.cpp
+73c53c2baa06bbfebe8211f62678aa2b60cb95f604743d3686951ba56b87ea47  tests/config_differential/oracle/core/src/logging/file_log.cpp  core 1fd2956:cpp/src/logging/file_log.cpp
+#
+# The first-run output of every published build, extracted once by compiling each build's
+# WriteDefaultConfig at its own core pin. v0.1.0 also stands for v0.1.1 and dev, which wrote
+# the same bytes; v1.0.1 also for v1.1.0 and v1.1.2.
+314f20f02760adb7d7b7b580e6ae705f901225ee49606a556730fa851d67d51a  tests/config_differential/data/v0.1.0-first-run.ini  v0.1.0 first run
+67994179b788ae2c5a8ce5596232e2933d6d01e576c734a8b8c8bbfd293d41a4  tests/config_differential/data/v1.0.0-first-run.ini  v1.0.0 first run
+2c33f12056d3248e472ad69ad0e6d43bdbefbbe580d75de64fed11c31f2a896d  tests/config_differential/data/v1.0.1-first-run.ini  v1.0.1 first run
+#
+# The frozen import. Never edited once the conversion landed.
+cde6e9c0aafa7ba49a2770065551d2ab5245e19a7ae1603906ffe27d960d54eb  src/legacy_config/legacy_config.h  frozen import
+e050f90c5b33a724435241dc00373fd76ed888b4485715d22433573703b62fde  src/legacy_config/legacy_config.cpp  frozen import
+#
+# The core sources the import compiles. IniReader is frozen in core, and its two files
+# equal 1fd2956's, so the import reads a file with the helpers the published build had.
+# Everything else the published reader took from core is copied into the frozen import.
+a7ffb44210ff59672fa97e8e5feaa2cb3e81938fcc0334a384c68bc371b3857a  cameraunlock-core/cpp/include/cameraunlock/config/ini_reader.h  core 1fd2956:cpp/include/cameraunlock/config/ini_reader.h
+e01515c2656aaf533bae4350dc45b702c3e3d4043935743dcc9bd5ea581fbe1c  cameraunlock-core/cpp/src/config/ini_reader.cpp  core 1fd2956:cpp/src/config/ini_reader.cpp

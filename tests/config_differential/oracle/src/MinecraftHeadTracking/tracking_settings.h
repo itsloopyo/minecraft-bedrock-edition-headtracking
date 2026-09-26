@@ -1,9 +1,11 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include "cameraunlock/data/position_settings.h"
 #include "cameraunlock/data/tracking_pose.h"
 #include "cameraunlock/math/smoothing_utils.h"
-#include "legacy_config/legacy_config.h"
 
 namespace mcht::tracking {
 
@@ -45,8 +47,21 @@ struct Settings {
     int Port = kDefaultTrackerPort;
 };
 
-// v1.1.2's settings as the frozen reader in src/legacy_config read them. Every float there
-// was validated for finiteness and range on the way in.
-Settings FromLegacy(const legacy::Config& config);
+// Reads the ini in one pass, or nothing when there is no ini to read.
+//
+// The absent case is a Settings{} the caller must still apply, not a licence to
+// apply nothing. The processors' own constructed defaults are NOT this mod's
+// defaults - their pitch and roll inversion is off where this engine needs it
+// on, and PositionProcessor arrives with tracker-pivot compensation enabled
+// where this mod requires it off - so leaving them alone is a third behaviour
+// belonging to nobody.
+//
+// Out-of-range values are clamped or replaced and reported, never passed on.
+// Every float here crosses a user boundary and ends up in a matrix the mod
+// copies into the game, and INI parsing is strtod, which happily returns nan
+// and inf. A NaN reaches the frustum planes and the chunk sort comparator - a
+// strict-weak-ordering violation, which is an out-of-bounds write inside
+// std::sort rather than merely a wrong picture.
+std::optional<Settings> ReadSettings(const std::string& configPath);
 
 }  // namespace mcht::tracking

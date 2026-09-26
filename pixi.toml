@@ -30,7 +30,7 @@ build-debug = { cmd = "cmake --build build --config Debug", depends-on = ["setup
 install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Release", depends-on = ["build"] }
 uninstall = "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1"
 
-package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build"] }
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build", "test"] }
 release = "powershell -ExecutionPolicy Bypass -File scripts/release.ps1"
 
 # The mod build forces CAMERAUNLOCK_BUILD_TESTS off, so nothing here exercises
@@ -49,7 +49,15 @@ test-build = { cmd = "cmake --build build-tests --config Release", depends-on = 
 # ordinary build, so it needs no second configure.
 test-mod = { cmd = "./build/Release/mcht_tests.exe", depends-on = ["build"] }
 
-test = { cmd = "./build-tests/tests/Release/cameraunlock_tests.exe", depends-on = ["test-build", "test-mod"] }
+# The config differential test: v1.1.2's reader against the frozen import in
+# src/legacy_config, over every published build's first-run file and core's
+# mutation corpus. The hashes in tests/config_differential/provenance.txt are
+# checked first, so the test cannot quietly compile something other than what
+# it claims to.
+test-provenance = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-provenance.ps1"
+test-config = { cmd = "./build/Release/config_differential_tests.exe", depends-on = ["build", "test-provenance"] }
+
+test = { cmd = "./build-tests/tests/Release/cameraunlock_tests.exe", depends-on = ["test-build", "test-mod", "test-config"] }
 
 # No PowerShell variables in here: pixi's task shell expands $name itself, so
 # a "$d" loop reaches powershell.exe with the variable already eaten.

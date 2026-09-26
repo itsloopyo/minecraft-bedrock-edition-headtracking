@@ -5,7 +5,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <optional>
 #include <string>
 
 #include "camera_hook.h"
@@ -328,14 +327,7 @@ void StartReceiver(int port) {
 
 }  // namespace
 
-bool Start(const std::string& configPath) {
-    // Applied whether or not the ini opened. Skipping it left the processors on
-    // their own constructed defaults, which are a third behaviour belonging to
-    // nobody: PositionProcessor arrives with tracker-pivot compensation on, so
-    // the 0.15m pitch-correlated position artifact ApplySettings exists to
-    // disable came back, and pitch and roll inversion arrives off, the opposite
-    // of the ini this mod writes, so nodding and leaning went the wrong way.
-    const Settings settings = ReadSettings(configPath).value_or(Settings{});
+bool Start(const Settings& settings) {
     ApplySettings(settings);
 
     if (!mcht::camera::Install(&ProvidePose)) {

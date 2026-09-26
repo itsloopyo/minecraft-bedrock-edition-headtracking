@@ -107,6 +107,7 @@ add_library(${MOD_NAME} SHARED
     src/MinecraftHeadTracking/head_tracking.cpp
     src/MinecraftHeadTracking/tracking_settings.cpp
     src/MinecraftHeadTracking/session_policy.cpp
+    src/legacy_config/legacy_config.cpp
     src/MinecraftHeadTracking/builds/build_registry.cpp
     src/MinecraftHeadTracking/builds/store_offsets.cpp
     src/MinecraftHeadTracking/builds/image_scan.cpp
@@ -186,3 +187,61 @@ endif()
 
 enable_testing()
 add_test(NAME mcht_tests COMMAND mcht_tests)
+
+# ---------------------------------------------------------------------------
+# The config differential test. The oracle is v1.1.2's Bootstrap and settings
+# reader with the core sources they compiled at its pin, copied verbatim into
+# tests/config_differential/oracle, plus its hotkey registration. Each oracle
+# library renames the namespaces at compile time, so neither collides with the
+# current core or with the other. provenance.txt records where every copied
+# file came from, and pixi run test checks their hashes before running it.
+# ---------------------------------------------------------------------------
+set(MCHT_DIFFERENTIAL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential)
+set(MCHT_ORACLE_DIR ${MCHT_DIFFERENTIAL_DIR}/oracle)
+
+add_library(mcht_config_oracle STATIC
+    ${MCHT_DIFFERENTIAL_DIR}/oracle_config_adapter.cpp
+    ${MCHT_ORACLE_DIR}/src/MinecraftHeadTracking/tracking_settings.cpp
+    ${MCHT_ORACLE_DIR}/core/src/config/ini_reader.cpp
+    ${MCHT_ORACLE_DIR}/core/src/logging/file_log.cpp
+)
+target_include_directories(mcht_config_oracle PRIVATE
+    ${MCHT_DIFFERENTIAL_DIR}/oracle_fake
+    ${MCHT_ORACLE_DIR}/src
+    ${MCHT_ORACLE_DIR}/core/include
+    ${MCHT_DIFFERENTIAL_DIR}
+)
+target_compile_definitions(mcht_config_oracle PRIVATE
+    cameraunlock=mcht_oracle_core
+    mcht=mcht_oracle
+    MCHT_MOD_VERSION="1.1.2"
+    MCHT_GIT_SHA="ccc3ba5"
+)
+
+add_library(mcht_hotkeys_oracle STATIC
+    ${MCHT_DIFFERENTIAL_DIR}/oracle_hotkeys_adapter.cpp
+)
+target_include_directories(mcht_hotkeys_oracle PRIVATE
+    ${MCHT_DIFFERENTIAL_DIR}/oracle_hk_fake
+    ${MCHT_ORACLE_DIR}/core/include
+    ${MCHT_DIFFERENTIAL_DIR}
+)
+target_compile_definitions(mcht_hotkeys_oracle PRIVATE cameraunlock=mcht_oracle_hk_core)
+
+add_executable(config_differential_tests
+    ${MCHT_DIFFERENTIAL_DIR}/differential_tests.cpp
+    src/legacy_config/legacy_config.cpp
+)
+target_include_directories(config_differential_tests PRIVATE src ${MCHT_DIFFERENTIAL_DIR})
+target_compile_definitions(config_differential_tests PRIVATE
+    MCHT_DIFFERENTIAL_DATA="${MCHT_DIFFERENTIAL_DIR}/data"
+)
+target_link_libraries(config_differential_tests PRIVATE
+    cameraunlock
+    mcht_config_oracle
+    mcht_hotkeys_oracle
+)
+if(MSVC)
+    target_compile_options(config_differential_tests PRIVATE /W4 /WX)
+endif()
+add_test(NAME config_differential_tests COMMAND config_differential_tests)
