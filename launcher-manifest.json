@@ -20,5 +20,12 @@
     }
   ],
   "runtime_requirements": [],
-  "dependencies": []
+  "dependencies": [],
+  "config": {
+    "path": "CameraUnlock.ini",
+    "anchor": "mod_home",
+    "legacy_source": "MinecraftHeadTracking.ini",
+    "canonical_since": "1.2.0",
+    "per_game": {}
+  }
 }

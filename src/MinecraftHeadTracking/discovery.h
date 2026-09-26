@@ -2,7 +2,7 @@
 
 namespace mcht::discovery {
 
-// Developer tool, off unless MinecraftHeadTracking.ini turns it on.
+// Developer tool, off unless [Discovery] RunDiscovery in CameraUnlock.ini turns it on.
 //
 // Drives the camera with a synthetic pose that holds one axis at a time -
 // yaw, pitch, roll, then X, Y, Z - separated by neutral gaps, naming each

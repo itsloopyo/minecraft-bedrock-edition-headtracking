@@ -5,23 +5,27 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
+#include "axis_signs.h"
 #include "camera_hook.h"
 #include "cameraunlock/data/position_data.h"
-#include "cameraunlock/input/chord_hotkeys.h"
 #include "cameraunlock/input/hotkey_poller.h"
+#include "cameraunlock/input/key_binding_registration.h"
+#include "cameraunlock/input/key_bindings.h"
 #include "cameraunlock/logging/file_log.h"
 #include "cameraunlock/math/smoothing_utils.h"
 #include "cameraunlock/processing/pose_interpolator.h"
 #include "cameraunlock/processing/position_interpolator.h"
 #include "cameraunlock/processing/position_processor.h"
 #include "cameraunlock/processing/tracking_processor.h"
+#include "cameraunlock/tracking/tracking_mode.h"
 #include "cameraunlock/protocol/udp_receiver.h"
 #include "frame_timing.h"
 #include "held_pose.h"
 #include "pose_composition.h"
-#include "tracking_settings.h"
 
 namespace mcht::tracking {
 namespace {
@@ -81,28 +85,31 @@ void ApplyConnectionLocality() {
 
 cameraunlock::input::HotkeyPoller g_hotkeys;
 
+// The one reader and writer of CameraUnlock.ini, owned by Bootstrap and saved
+// through from the hotkey thread.
+cameraunlock::config::ConfigOwner<mcht::config::Config>* g_owner = nullptr;
+
 std::atomic<bool> g_enabled{true};
 
-// What Page Up / Ctrl+Shift+G cycles through, in that order.
-enum class TrackingMode { Both, RotationOnly, PositionOnly };
-std::atomic<TrackingMode> g_trackingMode{TrackingMode::Both};
+// What the tracking mode hotkey cycles through, in this order.
+using cameraunlock::TrackingMode;
+std::atomic<TrackingMode> g_trackingMode{TrackingMode::RotationAndPosition};
 
 // Yaw about the world's up axis rather than the camera's. Default, because up
 // wants to be a constant: with the mouse pointed at your feet, turning your
 // head should still pan across the floor rather than spin the view.
 std::atomic<bool> g_worldSpaceYaw{true};
-int g_yawModeKey = kDefaultYawModeKey;
 
 TrackingMode NextTrackingMode(TrackingMode mode) {
     switch (mode) {
-        case TrackingMode::Both:
+        case TrackingMode::RotationAndPosition:
             return TrackingMode::RotationOnly;
         case TrackingMode::RotationOnly:
             return TrackingMode::PositionOnly;
         case TrackingMode::PositionOnly:
             break;
     }
-    return TrackingMode::Both;
+    return TrackingMode::RotationAndPosition;
 }
 
 const char* TrackingModeName(TrackingMode mode) {
@@ -111,7 +118,7 @@ const char* TrackingModeName(TrackingMode mode) {
             return "rotation only";
         case TrackingMode::PositionOnly:
             return "position only";
-        case TrackingMode::Both:
+        case TrackingMode::RotationAndPosition:
             break;
     }
     return "rotation and position";
@@ -236,50 +243,73 @@ bool ProvidePose(mcht::camera::Pose& out) {
 // Startup.
 // ---------------------------------------------------------------------------
 
-void ApplySettings(const Settings& settings) {
-    g_processor.SetSensitivity(settings.Sensitivity);
+void ApplySettings(const mcht::config::Config& config) {
+    g_processor.SetSensitivity(TrackerToBedrockRotation());
 
     // One pair for rotation and position alike, pushed to both processors.
     // Neither this function nor the render path picks between them: they hand
     // both values over and let the connection decide, so the choice cannot
     // drift between the two pipelines.
-    g_localSmoothing = settings.LocalSmoothing;
-    g_remoteSmoothing = settings.RemoteSmoothing;
+    g_localSmoothing = config.local_smoothing;
+    g_remoteSmoothing = config.remote_smoothing;
     g_processor.SetLocalSmoothing(g_localSmoothing);
     g_processor.SetRemoteSmoothing(g_remoteSmoothing);
 
-    // The pair is copied onto the geometry by name, never rebuilt positionally.
-    // PositionSettings gained a second smoothing field where the single one used
-    // to sit, and its trailing parameters are bools with defaults, so a
-    // positional form still COMPILES with every argument after the smoothing
-    // shifted one along: an inversion flag converts to a float and lands in
-    // RemoteSmoothing, with no diagnostic anywhere.
-    cameraunlock::PositionSettings position = settings.Position;
-    position.local_smoothing = g_localSmoothing;
-    position.remote_smoothing = g_remoteSmoothing;
-    g_positionProcessor.SetSettings(position);
+    // The limits and the smoothing copies come from the config; the position
+    // sensitivities and inversions stay at the identity PositionSettings starts
+    // with, since no row sets them.
+    g_positionProcessor.SetSettings(config.position);
 
     // Off, because we cannot feed it a rotation it can use. The pivot
     // compensation subtracts the translation artifact of a head rotating about
     // a pivot in front of the tracker, so it needs the rotation in the
     // tracker's own frame. The pose handed to Process has already been through
-    // sensitivity and inversion, so the artifact would be added rather than
+    // the pitch and roll negation, so the artifact would be added rather than
     // removed: about 0.15m of spurious pitch-correlated offset at 30 degrees,
     // against a 0.20m Y limit. That is large enough to have been read as an
     // axis sign during testing.
     g_positionProcessor.SetTrackerPivotForward(0.0f);
 
-    g_enabled.store(settings.EnableOnStartup);
-    g_trackingMode.store(settings.PositionEnabled ? TrackingMode::Both
-                                                  : TrackingMode::RotationOnly);
-    g_worldSpaceYaw.store(settings.WorldSpaceYaw);
-    g_yawModeKey = settings.YawModeKey;
+    g_enabled.store(config.enable_on_startup);
+    // The table never loads a pair that names no mode: it reads both rows as
+    // their defaults instead.
+    g_trackingMode.store(
+        cameraunlock::DecodeTrackingMode(config.rotation_enabled, config.position_enabled).value());
+    g_worldSpaceYaw.store(config.world_space_yaw);
 }
 
-void RegisterHotkeys() {
-    using cameraunlock::input::ChordGuarded;
-    using cameraunlock::input::NavGuarded;
+// A save that did not happen has already reached the log through the status
+// sink, and the session keeps the state the toggle applied. A save that did can
+// carry a line too, naming a row that stopped following Defaults.ini.
+void LogSave(const cameraunlock::config::ConfigSaveResult& saved) {
+    for (const std::string& line : saved.log) {
+        cameraunlock::logging::Line("%s", line.c_str());
+    }
+    if (saved.status != cameraunlock::config::ConfigSaveStatus::Saved) {
+        cameraunlock::logging::Line("The change applies for this session only.");
+    }
+}
 
+// The table has already refused a list that does not parse, so one here is a
+// bug rather than a typo in the file.
+std::vector<cameraunlock::input::KeyBinding> ParseKeys(const std::string& list) {
+    cameraunlock::input::KeyBindingsParseResult parsed = cameraunlock::input::ParseKeyBindings(list);
+    if (!parsed.ok()) {
+        throw std::logic_error("hotkey list '" + list + "' does not parse: " + parsed.error);
+    }
+    return parsed.bindings;
+}
+
+struct KeyLists {
+    std::vector<cameraunlock::input::KeyBinding> toggle;
+    std::vector<cameraunlock::input::KeyBinding> cycleMode;
+    std::vector<cameraunlock::input::KeyBinding> yawMode;
+};
+
+// The actions run on the hotkey poller's thread. Each toggle applies its new
+// state first, then saves it. End is the exception: it changes the session
+// only, so EnableOnStartup decides the next start.
+void RegisterHotkeys(const KeyLists& keys) {
     const auto toggle = [] {
         const bool now = !g_enabled.load(std::memory_order_relaxed);
         g_enabled.store(now, std::memory_order_relaxed);
@@ -290,21 +320,26 @@ void RegisterHotkeys() {
             NextTrackingMode(g_trackingMode.load(std::memory_order_relaxed));
         g_trackingMode.store(next, std::memory_order_relaxed);
         cameraunlock::logging::Line("Tracking mode: %s.", TrackingModeName(next));
+        const cameraunlock::TrackingModeChannels channels = cameraunlock::EncodeTrackingMode(next);
+        LogSave(g_owner->Save([channels](mcht::config::Config& c) {
+            c.rotation_enabled = channels.rotation_enabled;
+            c.position_enabled = channels.position_enabled;
+        }));
     };
     const auto toggleYawMode = [] {
         const bool now = !g_worldSpaceYaw.load(std::memory_order_relaxed);
         g_worldSpaceYaw.store(now, std::memory_order_relaxed);
         cameraunlock::logging::Line("Yaw mode: %s.", YawModeName(now));
+        LogSave(g_owner->Save([now](mcht::config::Config& c) { c.world_space_yaw = now; }));
     };
 
-    g_hotkeys.AddHotkey(VK_END, NavGuarded(toggle));
-    g_hotkeys.AddHotkey(VK_PRIOR, NavGuarded(cycleMode));
-    g_hotkeys.AddHotkey(g_yawModeKey, NavGuarded(toggleYawMode));
-
-    // Chord alternatives for keyboards without a nav cluster.
-    g_hotkeys.AddHotkey('Y', ChordGuarded(toggle));
-    g_hotkeys.AddHotkey('G', ChordGuarded(cycleMode));
-    g_hotkeys.AddHotkey('H', ChordGuarded(toggleYawMode));
+    // One registration per key: a binding without modifiers stays quiet while
+    // Ctrl and Shift are both held, so Ctrl+Shift with a key reaches only a
+    // binding that names it, and one press never fires an action twice.
+    using cameraunlock::input::RegisterKeyBindings;
+    RegisterKeyBindings(g_hotkeys, keys.toggle, toggle);
+    RegisterKeyBindings(g_hotkeys, keys.cycleMode, cycleMode);
+    RegisterKeyBindings(g_hotkeys, keys.yawMode, toggleYawMode);
 
     g_hotkeys.Start();
 }
@@ -327,19 +362,26 @@ void StartReceiver(int port) {
 
 }  // namespace
 
-bool Start(const Settings& settings) {
-    ApplySettings(settings);
+bool Start(const mcht::config::Config& config,
+           cameraunlock::config::ConfigOwner<mcht::config::Config>& owner) {
+    // Parsed before anything is installed, so a list that does not parse
+    // leaves the game untouched.
+    const KeyLists keys{ParseKeys(config.toggle_key_name), ParseKeys(config.cycle_tracking_mode_key_name),
+                        ParseKeys(config.yaw_mode_key_name)};
+    g_owner = &owner;
+    ApplySettings(config);
 
     if (!mcht::camera::Install(&ProvidePose)) {
         return false;
     }
 
-    StartReceiver(settings.Port);
+    StartReceiver(config.udp_port);
 
-    RegisterHotkeys();
+    RegisterHotkeys(keys);
     cameraunlock::logging::Line(
-        "Controls: End / Ctrl+Shift+Y toggle tracking, "
-        "PageUp / Ctrl+Shift+G cycle tracking mode, PageDown / Ctrl+Shift+H toggle yaw mode.");
+        "Controls: toggle tracking [%s], cycle tracking mode [%s], toggle yaw mode [%s].",
+        config.toggle_key_name.c_str(), config.cycle_tracking_mode_key_name.c_str(),
+        config.yaw_mode_key_name.c_str());
     cameraunlock::logging::Line("Yaw mode: %s.", YawModeName(g_worldSpaceYaw.load()));
     return true;
 }

@@ -14,9 +14,9 @@ zero poses at about 400Hz, which drowns a 60Hz synthetic stream roughly 7 to 1
 and makes tracking look broken when it is not.
 
 ```
-# in MinecraftHeadTracking.ini
-[Tracking]
-Port=4243
+# in CameraUnlock.ini
+[Network]
+UdpPort=4243
 ```
 
 Set it back to 4242 afterwards, or a real tracker will not be heard.
@@ -66,7 +66,7 @@ python scripts/position_test.py 15 4243
 That last row is the real assertion: it proves the post-view transform is
 restored exactly and nothing accumulates over a session.
 
-For rotation, `Discovery/Enabled=true` cycles one axis at a time and names each
+For rotation, `[Discovery] RunDiscovery=true` in `CameraUnlock.ini` cycles one axis at a time and names each
 phase in the log; `scripts/calibrate_capture.py` screenshots each phase. Yaw
 should be a clean pan, pitch a clean tilt, roll a clean horizon rotation, with
 no cross-contamination.

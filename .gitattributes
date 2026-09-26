@@ -6,3 +6,7 @@
 # sources are compared byte for byte, so git must not touch their line endings.
 tests/config_differential/data/** -text
 tests/config_differential/oracle/** -text
+
+# The committed canonical config is compared byte for byte with the table's render, CRLF
+# line endings included.
+config/MinecraftHeadTracking.ini -text

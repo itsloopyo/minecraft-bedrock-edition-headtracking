@@ -1,98 +1,21 @@
 #include <windows.h>
 
+#include <exception>
 #include <string>
+#include <utility>
 
 #include "builds/build_registry.h"
-#include "cameraunlock/config/ini_reader.h"
+#include "cameraunlock/config/config_owner.h"
+#include "cameraunlock/config/defaults_file.h"
 #include "cameraunlock/logging/file_log.h"
 #include "common/module_path.h"
+#include "config.h"
 #include "discovery.h"
 #include "head_tracking.h"
-#include "legacy_config/legacy_config.h"
-#include "tracking_settings.h"
 
 namespace {
 
 HMODULE g_self = nullptr;
-
-// Written into the ini this mod creates. The frozen reader's default is the
-// same 40.
-constexpr int kDefaultDiscoverySeconds = 40;
-
-// Written once, so the discovery switch is discoverable without reading the
-// source. Never overwrites an existing file.
-//
-// Every value comes from a default-constructed Settings - the same object that
-// applies when there is no readable ini - so the file cannot state one default
-// while the no-file path applies another. That drift has already shipped once
-// here, as an ini promising inverted pitch beside a no-ini path that nodded
-// the wrong way.
-void WriteDefaultConfig(const std::wstring& path, const std::string& ansiPath) {
-    if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
-        return;
-    }
-    cameraunlock::IniWriter writer;
-    if (!writer.Open(ansiPath)) {
-        cameraunlock::logging::Line("Could not create %S; built-in defaults apply.", path.c_str());
-        return;
-    }
-    const mcht::tracking::Settings defaults;
-
-    writer.WriteComment(" MinecraftHeadTracking");
-    writer.WriteBlankLine();
-    writer.WriteSection("Tracking");
-    writer.WriteComment(" UDP port the tracker sends OpenTrack packets to.");
-    writer.WriteInt("Port", defaults.Port);
-    writer.WriteBool("EnableOnStartup", defaults.EnableOnStartup);
-    writer.WriteComment(" Smoothing, 0.0 (none) to 1.0 (heavy). Which of the two applies is");
-    writer.WriteComment(" decided per connection from where the packets come from, so both");
-    writer.WriteComment(" can be set and left alone. Nothing is applied on top of these: 0.0");
-    writer.WriteComment(" means none. Both cover head rotation and head position alike.");
-    writer.WriteComment(" LocalSmoothing: the tracker runs on this PC (loopback). Already");
-    writer.WriteComment(" steady, so smoothing here only costs latency.");
-    writer.WriteDouble("LocalSmoothing", defaults.LocalSmoothing);
-    writer.WriteComment(" RemoteSmoothing: the tracker is a phone or another PC on the");
-    writer.WriteComment(" network. Covers the jitter the network adds.");
-    writer.WriteDouble("RemoteSmoothing", defaults.RemoteSmoothing);
-    writer.WriteDouble("YawSensitivity", defaults.Sensitivity.yaw);
-    writer.WriteDouble("PitchSensitivity", defaults.Sensitivity.pitch);
-    writer.WriteDouble("RollSensitivity", defaults.Sensitivity.roll);
-    writer.WriteComment(" Pitch and roll are inverted by default: Bedrock's post-view transform");
-    writer.WriteComment(" runs them opposite to the OpenTrack convention, so leaving these off");
-    writer.WriteComment(" makes leaning and nodding go the wrong way.");
-    writer.WriteBool("InvertYaw", defaults.Sensitivity.invert_yaw);
-    writer.WriteBool("InvertPitch", defaults.Sensitivity.invert_pitch);
-    writer.WriteBool("InvertRoll", defaults.Sensitivity.invert_roll);
-    writer.WriteComment(" true keeps yaw horizon-locked: turning your head yaws about the world's");
-    writer.WriteComment(" up axis whatever the mouse has the camera pointed at. false yaws about");
-    writer.WriteComment(" the camera's own up axis instead, which leans and rolls the view when");
-    writer.WriteComment(" you are looking at the floor or the sky.");
-    writer.WriteBool("WorldSpaceYaw", defaults.WorldSpaceYaw);
-    writer.WriteBlankLine();
-    writer.WriteSection("Hotkeys");
-    writer.WriteComment(" Toggles the two yaw modes in game. 0x22 is Page Down; Ctrl+Shift+H does");
-    writer.WriteComment(" the same thing and is not configurable.");
-    writer.WriteHex("YawModeKey", defaults.YawModeKey);
-    writer.WriteBlankLine();
-    writer.WriteSection("Position");
-    writer.WriteComment(" 6DOF: leaning and moving your head shifts the viewpoint.");
-    writer.WriteBool("Enabled", defaults.PositionEnabled);
-    writer.WriteDouble("SensitivityX", defaults.Position.sensitivity_x);
-    writer.WriteDouble("SensitivityY", defaults.Position.sensitivity_y);
-    writer.WriteDouble("SensitivityZ", defaults.Position.sensitivity_z);
-    writer.WriteComment(" Flip an axis if your tracker's convention disagrees with the defaults.");
-    writer.WriteBool("InvertX", defaults.Position.invert_x);
-    writer.WriteBool("InvertY", defaults.Position.invert_y);
-    writer.WriteBool("InvertZ", defaults.Position.invert_z);
-    writer.WriteBlankLine();
-    writer.WriteSection("Discovery");
-    writer.WriteComment(" Developer tool. Drives the camera through one axis at a time and names");
-    writer.WriteComment(" each phase in the log, which is how the axis mapping is measured for a");
-    writer.WriteComment(" new Minecraft build. Head tracking input is ignored while it runs, and");
-    writer.WriteComment(" it obeys the same PvP rules as head tracking. Needs you in a world.");
-    writer.WriteBool("Enabled", false);
-    writer.WriteInt("DurationSeconds", kDefaultDiscoverySeconds);
-}
 
 // What a bug report needs before anything else: which mod build is running,
 // in which process, against which image.
@@ -107,8 +30,12 @@ void LogHostEnvironment() {
     cameraunlock::logging::Line("Module base: 0x%p", static_cast<void*>(GetModuleHandleW(nullptr)));
 }
 
-DWORD WINAPI Bootstrap(LPVOID) {
-    // The log and ini live beside the mod DLL, not beside the game EXE.
+// The one reader and writer of CameraUnlock.ini. Never destroyed: the hotkey
+// thread saves through it for as long as the game runs.
+cameraunlock::config::ConfigOwner<mcht::config::Config>* g_configOwner = nullptr;
+
+void BootstrapBody() {
+    // The log and settings live beside the mod DLL, not beside the game EXE.
     // Bedrock's install directory is under C:\Program Files\WindowsApps and is
     // not writable, and a packaged app's working directory is not somewhere a
     // user would find a file either, so the mod's own deployment folder is the
@@ -124,25 +51,46 @@ DWORD WINAPI Bootstrap(LPVOID) {
     if (result != mcht::builds::SelectResult::Matched &&
         result != mcht::builds::SelectResult::Adopted) {
         cameraunlock::logging::Line("Dormant. No hooks installed.");
-        return 0;
+        return;
     }
 
-    const std::wstring configPath = directory + L"MinecraftHeadTracking.ini";
-    // Converted once: writing the file, probing it here and reading it in
-    // Start must all name the same bytes, and the conversion is where that can
-    // stop being true.
-    const std::string configPathAnsi = mcht::legacy::AnsiPath(configPath);
-    WriteDefaultConfig(configPath, configPathAnsi);
+    // One game process opens this folder's settings: the launcher refuses to
+    // inject while more than one Minecraft.Windows.exe runs.
+    cameraunlock::config::ConfigOwnerOptions<mcht::config::Config> options =
+        mcht::config::MakeConfigOwnerOptions(directory, cameraunlock::config::DefaultsFile::PerUser());
+    options.status_sink = [](const std::string& message) {
+        cameraunlock::logging::Line("%s", message.c_str());
+    };
+    g_configOwner = new cameraunlock::config::ConfigOwner<mcht::config::Config>(std::move(options));
 
-    mcht::legacy::Config config;
-    config.Read(configPath, configPathAnsi);
-    if (config.discovery_enabled) {
-        cameraunlock::logging::Line("Discovery mode is enabled in MinecraftHeadTracking.ini.");
+    const cameraunlock::config::ConfigLoadResult<mcht::config::Config> loaded = g_configOwner->Load();
+    for (const std::string& line : loaded.log) {
+        cameraunlock::logging::Line("%s", line.c_str());
+    }
+    cameraunlock::logging::Line("Settings: %s.", cameraunlock::config::ConfigLoadStatusName(loaded.status));
+    const mcht::config::Config& config = loaded.config;
+
+    if (config.run_discovery) {
+        cameraunlock::logging::Line("Discovery mode is enabled in CameraUnlock.ini.");
         mcht::discovery::InstallCalibration(config.discovery_seconds);
-        return 0;
+        return;
     }
 
-    mcht::tracking::Start(mcht::tracking::FromLegacy(config));
+    mcht::tracking::Start(config, *g_configOwner);
+}
+
+// A thread procedure has no handler above it, so an exception escaping here
+// would be std::terminate, taking the game down with the log stopping
+// mid-startup. The config owner refuses a table it cannot render, the key
+// lists are parsed, and the receiver and the hotkey poller each start a
+// thread, all of which throw on failure.
+DWORD WINAPI Bootstrap(LPVOID) {
+    try {
+        BootstrapBody();
+    } catch (const std::exception& e) {
+        cameraunlock::logging::Line("ERROR: head tracking did not start: %s", e.what());
+        return 1;
+    }
     return 0;
 }
 

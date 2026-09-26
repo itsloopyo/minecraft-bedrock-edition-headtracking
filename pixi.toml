@@ -50,14 +50,32 @@ test-build = { cmd = "cmake --build build-tests --config Release", depends-on = 
 test-mod = { cmd = "./build/Release/mcht_tests.exe", depends-on = ["build"] }
 
 # The config differential test: v1.1.2's reader against the frozen import in
-# src/legacy_config, over every published build's first-run file and core's
-# mutation corpus. The hashes in tests/config_differential/provenance.txt are
-# checked first, so the test cannot quietly compile something other than what
-# it claims to.
+# src/legacy_config, and the import against the migration into CameraUnlock.ini,
+# over every published build's first-run file and core's mutation corpus. The
+# hashes in tests/config_differential/provenance.txt are checked first, so the
+# test cannot quietly compile something other than what it claims to.
 test-provenance = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-provenance.ps1"
 test-config = { cmd = "./build/Release/config_differential_tests.exe", depends-on = ["build", "test-provenance"] }
 
-test = { cmd = "./build-tests/tests/Release/cameraunlock_tests.exe", depends-on = ["test-build", "test-mod", "test-config"] }
+# Core's canonical config lint over the committed file and every distinct file
+# the differential test migrated.
+test-config-lint = { cmd = "node tests/config_differential/lint-migrated.mjs build/Release/migrated", depends-on = ["test-config"] }
+
+# The committed config against the table, a first start, the toggles' saves and
+# the legacy file's ANSI path.
+test-config-files = { cmd = "./build/Release/config_tests.exe", depends-on = ["build"] }
+
+test = { cmd = "./build-tests/tests/Release/cameraunlock_tests.exe", depends-on = ["test-build", "test-mod", "test-config", "test-config-lint", "test-config-files"] }
+
+# Rewrite config/MinecraftHeadTracking.ini, the committed copy of the
+# CameraUnlock.ini the mod creates at first launch, from the config table after a
+# change to a row, a comment or a default, then rewrite the per_game of
+# launcher-manifest.json's config descriptor from it.
+render-config = { cmd = "./build/Release/config_tests.exe --render-config config/MinecraftHeadTracking.ini && node cameraunlock-core/scripts/encode-seed.mjs", depends-on = ["build"] }
+
+# Checks the newest release/*-installer.zip against its launcher manifest and
+# config descriptor. Package first.
+validate-manifest = "node cameraunlock-core/scripts/validate-manifest.mjs"
 
 # No PowerShell variables in here: pixi's task shell expands $name itself, so
 # a "$d" loop reaches powershell.exe with the variable already eaten.

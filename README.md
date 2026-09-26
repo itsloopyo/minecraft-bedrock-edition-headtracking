@@ -6,6 +6,12 @@ headset needed.
 
 ![Mod GIF](https://raw.githubusercontent.com/itsloopyo/minecraft-bedrock-edition-headtracking/main/assets/readme-clip.gif)
 
+> **Settings have moved.** From this version the mod keeps its settings in
+> `CameraUnlock.ini`, beside `MinecraftHeadTracking.dll`. The first time it starts
+> without one, it reads your settings from `MinecraftHeadTracking.ini`, the file
+> earlier versions used, and never changes that file. See
+> [Configuration](#configuration).
+
 ## Features
 
 - **Decoupled look and aim** - your head moves the camera, the mouse still
@@ -75,8 +81,8 @@ launcher instead of the usual Minecraft shortcut.
 Nothing is ever copied into the game folder. Bedrock installs under
 `C:\Program Files\WindowsApps`, which Windows signature-checks and does not
 allow files to be added to, so the mod lives entirely in the folder you chose.
-`MinecraftHeadTracking.ini` and `MinecraftHeadTracking.log` are written there on
-the first run. For the same reason there is no separate Nexus ZIP: with nothing
+`CameraUnlock.ini` and `MinecraftHeadTracking.log` are written there on the
+first run. For the same reason there is no separate Nexus ZIP: with nothing
 to extract into the game directory, it would be identical to the release ZIP.
 
 ## Setting Up OpenTrack
@@ -111,8 +117,11 @@ on that port with its output on 4242.
 
 ## Controls
 
-Two equivalent binding sets, so use whichever your keyboard has. The nav-cluster
-keys are quicker; the chords work on keyboards without a nav cluster.
+Each action has two keys by default, so use whichever your keyboard has. The
+nav-cluster keys are quicker; the chords work on keyboards without a nav cluster.
+Both are ordinary entries in the action's key list in `CameraUnlock.ini`
+(`ToggleKey`, `CycleTrackingModeKey`, `YawModeKey`), so either can be changed or
+removed there.
 
 | Action              | Nav-cluster | Chord           |
 |---------------------|-------------|-----------------|
@@ -123,6 +132,11 @@ keys are quicker; the chords work on keyboards without a nav cluster.
 Cycling the tracking mode steps through: normal head-tracked gameplay,
 rotation only, position only, then back to normal.
 
+The tracking mode and the yaw mode are saved to `CameraUnlock.ini` as soon as you
+change them, and come back at the next start. Toggling tracking with `End` lasts
+for the current session only: whether tracking is on at the next start is
+`EnableOnStartup`.
+
 The yaw mode switches between world-locked yaw, the default, which turns your
 head about the world's up axis so up stays constant (point the mouse at your
 feet and turning your head still pans across the floor), and camera-local yaw,
@@ -131,86 +145,130 @@ steep mouse angles. Some people prefer camera-local for flying and falling.
 
 ## Configuration
 
-`MinecraftHeadTracking.ini` sits beside the mod DLL, in the folder you extracted,
-and is written with every setting at its default the first time the mod runs. So
-is `MinecraftHeadTracking.log`.
+<!-- cameraunlock:config -->
+The mod reads its settings from `CameraUnlock.ini`. The file sits beside MinecraftHeadTracking.dll, in Lopari's mod_home folder or wherever a manual install was extracted, never in the game folder. It creates the file when it starts and finds none. Edit it with any text editor.
+
+A setting set to `default` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads. Head tracking mods that keep their settings in another file do not read it, and neither do earlier versions of this mod. Writing a value in place of `default` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.
+
+`Defaults.ini` is `%AppData%\CameraUnlock\Defaults.ini` on Windows; `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` on Linux, or `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, under Wine and Proton too; and `~/Library/Application Support/CameraUnlock/Defaults.ini` on macOS. The mod's log, where it writes one, names the file it read.
+
+When the mod starts and finds no `Defaults.ini`, it creates one holding the built-in values, unless Windows runs the game as a packaged app. The mod never changes `Defaults.ini` after that. Edit it with any text editor.
+
+Earlier versions of the mod kept these settings in `MinecraftHeadTracking.ini`, in the same folder. The first time this version starts and finds no `CameraUnlock.ini`, it reads your settings from `MinecraftHeadTracking.ini` and writes them into `CameraUnlock.ini`. It never changes `MinecraftHeadTracking.ini`, and does not read it again while `CameraUnlock.ini` exists.
+
+A setting that the defaults below set to `default` is written as `default` when the value imported for it equals its default at that start, which is the value `Defaults.ini` gives it, or the built-in value where `Defaults.ini` gives none. It then follows `Defaults.ini`. Every other setting is written with the value imported for it. `RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.
+
+Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
+
+- Reticle settings, and a key that toggled the reticle.
+- A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
+- The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
+
+An older version of the mod reads `MinecraftHeadTracking.ini` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `MinecraftHeadTracking.ini`.
+
+Deleting only `CameraUnlock.ini` makes the next start read `MinecraftHeadTracking.ini` again. To go back to the defaults, replace everything in `CameraUnlock.ini` with the defaults below. Every setting they set to `default` then follows `Defaults.ini`.
+
+The built-in value of each setting set to `default` below:
+
+- `UdpPort=4242`
+- `EnableOnStartup=true`
+- `WorldSpaceYaw=true`
+- `RotationEnabled=true`
+- `LocalSmoothing=0.0`
+- `RemoteSmoothing=0.15`
+- `PositionEnabled=true`
+- `PositionLimitX=0.3`
+- `PositionLimitY=0.2`
+- `PositionLimitYDown=0.2`
+- `PositionLimitZ=0.4`
+- `PositionLimitZBack=0.1`
+- `ToggleKey=End, Ctrl+Shift+Y`
+- `CycleTrackingModeKey=PageUp, Ctrl+Shift+G`
+- `YawModeKey=PageDown, Ctrl+Shift+H`
+
+With every setting at its default, the file reads:
 
 ```ini
-; MinecraftHeadTracking
+; Minecraft: Bedrock Edition head tracking settings.
+; Comments start with ; and go on their own line. Text after a value is part of the value.
+; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; leave empty for none.
+; A setting set to default takes its value from Defaults.ini, which every head tracking mod
+; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
+; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
+; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
+; on macOS. The log names the file it read. Write a value instead of default to change that
+; setting for this game only.
 
-[Tracking]
-; UDP port the tracker sends OpenTrack packets to.
-Port=4242
-EnableOnStartup=true
-; Smoothing, 0.0 (none) to 1.0 (heavy). Which of the two applies is
-; decided per connection from where the packets come from, so both
-; can be set and left alone. Nothing is applied on top of these: 0.0
-; means none. Both cover head rotation and head position alike.
-; LocalSmoothing: the tracker runs on this PC (loopback). Already
-; steady, so smoothing here only costs latency.
-LocalSmoothing=0.0
-; RemoteSmoothing: the tracker is a phone or another PC on the
-; network. Covers the jitter the network adds.
-RemoteSmoothing=0.15
-YawSensitivity=1.0
-PitchSensitivity=1.0
-RollSensitivity=1.0
-; Pitch and roll are inverted by default: Bedrock's post-view transform
-; runs them opposite to the OpenTrack convention, so leaving these off
-; makes leaning and nodding go the wrong way.
-InvertYaw=false
-InvertPitch=true
-InvertRoll=true
-; true keeps yaw horizon-locked: turning your head yaws about the world's
-; up axis whatever the mouse has the camera pointed at. false yaws about
-; the camera's own up axis instead, which leans and rolls the view when
-; you are looking at the floor or the sky.
-WorldSpaceYaw=true
+[CameraUnlock]
+; Written by the mod. Leave this section in place.
+ConfigFormat=1
 
-[Hotkeys]
-; Toggles the two yaw modes in game. 0x22 is Page Down; Ctrl+Shift+H does
-; the same thing and is not configurable.
-YawModeKey=0x22
+[Network]
+; UDP port the mod receives tracker data on (OpenTrack protocol).
+UdpPort=default
+
+[General]
+; true: head tracking is on when the game starts. ToggleKey turns it on and off.
+EnableOnStartup=default
+; true: yaw turns around the world's up axis. false: around the camera's own up axis.
+WorldSpaceYaw=default
+; true: turning your head turns the view.
+; Tracking mode at startup, with PositionEnabled. The mode hotkey changes both.
+RotationEnabled=default
+
+[Smoothing]
+; Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.
+LocalSmoothing=default
+; Smoothing when the tracker is another device on the network, such as a phone.
+; 0 is the least, 1 the most.
+RemoteSmoothing=default
 
 [Position]
-; 6DOF: leaning and moving your head shifts the viewpoint.
-Enabled=true
-SensitivityX=1.0
-SensitivityY=1.0
-SensitivityZ=1.0
-; Flip an axis if your tracker's convention disagrees with the defaults.
-InvertX=false
-InvertY=false
-InvertZ=false
+; true: moving your head moves the view.
+; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
+PositionEnabled=default
+; How far, in metres, leaning left or right can move the view.
+PositionLimitX=default
+; How far, in metres, raising your head can move the view.
+PositionLimitY=default
+; How far, in metres, lowering your head can move the view.
+PositionLimitYDown=default
+; How far, in metres, leaning forward can move the view.
+PositionLimitZ=default
+; How far, in metres, leaning back can move the view.
+PositionLimitZBack=default
+
+[Hotkeys]
+; Turns head tracking on and off.
+ToggleKey=default
+; Changes the tracking mode: rotation and position, rotation only, position only.
+CycleTrackingModeKey=default
+; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
+YawModeKey=default
 
 [Discovery]
-; Developer tool. Drives the camera through one axis at a time and names
-; each phase in the log, which is how the axis mapping is measured for a
-; new Minecraft build. Head tracking input is ignored while it runs, and
-; it obeys the same PvP rules as head tracking. Needs you in a world.
-Enabled=false
+; Developer tool. true: instead of head tracking, drive the camera through one axis at a
+; time and name each phase in MinecraftHeadTracking.log, to measure the axis mapping of a
+; new Minecraft build. It obeys the same PvP rules as head tracking. Needs you in a world.
+RunDiscovery=false
+; How long each discovery run lasts, in seconds. A value below 1 runs for 1, and one above
+; 3600 for 3600.
 DurationSeconds=40
 ```
+<!-- /cameraunlock:config -->
 
-The file is read at startup, so restart the game after editing it. `Page Down`
-switches yaw mode straight away but does not write the choice back, so the mod
-comes up in whatever the file says.
+The file is read at startup, so restart the game after editing it.
 
-Any setting left out of the file takes its default, so a file written by an older
-version keeps working. The travel limits on head position are read from the
-`[Position]` section too, and can be added by hand: `LimitX=0.30`, `LimitY=0.20`,
-`LimitZ=0.40` forward, `LimitZBack=0.10` back, all in meters.
+Minecraft for Windows runs as a packaged Store app, so this mod never creates
+`Defaults.ini`. `MinecraftHeadTracking.log` says whether it found one.
 
-`[Position]` has no smoothing key of its own: `LocalSmoothing` and
-`RemoteSmoothing` in `[Tracking]` cover head rotation and head position
-together. The single `Smoothing` key that used to sit in both sections is
-retired and ignored, and is not migrated into the new keys, because it carried a
-hidden 0.15 floor and its number no longer means what it did. The log says so
-once if your file still has it.
-
-Save the file as plain ANSI or UTF-8 without a byte order mark. Notepad adds a
-BOM by default, and Windows then cannot read a single setting in the file. The
-log says so when it happens.
+The sensitivity and inversion settings are gone: `YawSensitivity`,
+`PitchSensitivity`, `RollSensitivity`, `InvertYaw`, `InvertPitch` and
+`InvertRoll` in `[Tracking]`, and `SensitivityX`, `SensitivityY`, `SensitivityZ`,
+`InvertX`, `InvertY` and `InvertZ` in `[Position]`. Set these in your tracker
+instead. The pitch and roll inversion earlier versions shipped as their defaults
+is part of the mod's own axis conversion now, so the view moves as it did with
+those settings at their defaults.
 
 ## Troubleshooting
 
@@ -241,7 +299,7 @@ head.
   is on and another player is in the session, and treats host, guest, Realm and
   dedicated server alike. This is not configurable.
 - Confirm OpenTrack is started and its output is `UDP over network` to
-  `127.0.0.1:4242`, matching `Port` in the ini.
+  `127.0.0.1:4242`, matching `UdpPort` in `CameraUnlock.ini`.
 - Press `End` (`Ctrl+Shift+Y`) in case tracking was toggled off.
 - If the view sits off centre, centre it in the tracker app (OpenTrack's Center
   bind, the CENTER button in Headcam).
@@ -249,9 +307,10 @@ head.
 **Jittery or unstable tracking.** The view shakes or twitches while your head is
 still.
 
-- Raise the one that applies to your setup toward 0.3 and restart the game, and
-  leave the other alone: `RemoteSmoothing` in `[Tracking]` for a phone or a
-  second PC, `LocalSmoothing` for a tracker running on this PC. Wireless and
+- Raise the one that applies to your setup toward 0.3 in `[Smoothing]` in
+  `CameraUnlock.ini` and restart the game, and leave the other alone:
+  `RemoteSmoothing` for a phone or a second PC, `LocalSmoothing` for a tracker
+  running on this PC. Wireless and
   webcam trackers need more than a headset does. The log line beginning
   `Tracker source is` says which of the two is in effect.
 - Improve the lighting for a webcam tracker, or move a phone tracker to a stable
@@ -261,9 +320,8 @@ still.
 
 **Wrong rotation axis.** Nodding rolls the view, or an axis moves the wrong way.
 
-- Flip `InvertYaw`, `InvertPitch` or `InvertRoll` in `[Tracking]`, one at a time,
-  and `InvertX`, `InvertY`, `InvertZ` in `[Position]` for the lean axes.
-  `InvertPitch` and `InvertRoll` are on by default and are correct for OpenTrack.
+- The mod has no inversion settings: invert the axis in your tracker, and
+  report it on Discord so the mod's own axis conversion can be checked.
 - If yaw feels wrong only when looking steeply up or down, toggle yaw mode with
   `Page Down` (`Ctrl+Shift+H`). World-locked is horizon-stable; camera-local
   follows the camera's up axis. The log records which one is live.
@@ -279,17 +337,20 @@ menu or the inventory.
 ## Updating
 
 Download the new release and extract it over the folder you installed to, then
-run the launcher again. Your config is preserved: `MinecraftHeadTracking.ini` is
-only ever written when it is missing.
+run the launcher again. The release ZIP carries no settings file, so
+`CameraUnlock.ini` is kept as it is. Updating from a version that kept its
+settings in `MinecraftHeadTracking.ini` imports that file once, as
+[Configuration](#configuration) describes.
 
 ## Uninstalling
 
-Delete the folder you extracted, along with the `.ini` and `.log` beside the
-binaries. That is the whole uninstall. Nothing was written to the game's install
-directory and there is no mod loader to remove, so there is no `uninstall.cmd`
-and no `/force` flag to undo more than that. Minecraft itself is untouched. If
-you installed from source instead, `pixi run uninstall` removes the deployed
-files.
+Delete `MinecraftHeadTracking.dll` and `MinecraftHeadTrackingLauncher.exe` from
+the folder you extracted. That is the whole uninstall. `CameraUnlock.ini`, a
+`MinecraftHeadTracking.ini` from an earlier version and the log stay where they
+are, so a reinstall into the same folder keeps your settings. Nothing was written
+to the game's install directory and there is no mod loader to remove, so there is
+no `uninstall.cmd`. Minecraft itself is untouched. If you installed from source
+instead, `pixi run uninstall` removes the deployed DLL and launcher the same way.
 
 ## Building from Source
 

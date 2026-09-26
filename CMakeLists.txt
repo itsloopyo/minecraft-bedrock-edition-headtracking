@@ -105,7 +105,7 @@ add_library(${MOD_NAME} SHARED
     src/MinecraftHeadTracking/discovery.cpp
     src/MinecraftHeadTracking/camera_hook.cpp
     src/MinecraftHeadTracking/head_tracking.cpp
-    src/MinecraftHeadTracking/tracking_settings.cpp
+    src/MinecraftHeadTracking/config.cpp
     src/MinecraftHeadTracking/session_policy.cpp
     src/legacy_config/legacy_config.cpp
     src/MinecraftHeadTracking/builds/build_registry.cpp
@@ -230,11 +230,17 @@ target_compile_definitions(mcht_hotkeys_oracle PRIVATE cameraunlock=mcht_oracle_
 
 add_executable(config_differential_tests
     ${MCHT_DIFFERENTIAL_DIR}/differential_tests.cpp
+    src/MinecraftHeadTracking/config.cpp
     src/legacy_config/legacy_config.cpp
 )
-target_include_directories(config_differential_tests PRIVATE src ${MCHT_DIFFERENTIAL_DIR})
+target_include_directories(config_differential_tests PRIVATE
+    src
+    src/MinecraftHeadTracking
+    ${MCHT_DIFFERENTIAL_DIR}
+)
 target_compile_definitions(config_differential_tests PRIVATE
     MCHT_DIFFERENTIAL_DATA="${MCHT_DIFFERENTIAL_DIR}/data"
+    MCHT_COMMITTED_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/MinecraftHeadTracking.ini"
 )
 target_link_libraries(config_differential_tests PRIVATE
     cameraunlock
@@ -245,3 +251,28 @@ if(MSVC)
     target_compile_options(config_differential_tests PRIVATE /W4 /WX)
 endif()
 add_test(NAME config_differential_tests COMMAND config_differential_tests)
+
+# Core's canonical config lint over the committed file and every file the
+# differential test migrated, which it writes beside itself under migrated.
+add_test(NAME config_lint COMMAND node
+    ${MCHT_DIFFERENTIAL_DIR}/lint-migrated.mjs
+    $<TARGET_FILE_DIR:config_differential_tests>/migrated)
+set_tests_properties(config_lint PROPERTIES DEPENDS config_differential_tests)
+
+# The committed config against the table, a first start, the toggles' saves
+# and the legacy file's ANSI path. `--render-config <path>` makes it write the
+# committed file instead (pixi run render-config).
+add_executable(config_tests
+    tests/config_tests.cpp
+    src/MinecraftHeadTracking/config.cpp
+    src/legacy_config/legacy_config.cpp
+)
+target_include_directories(config_tests PRIVATE src src/MinecraftHeadTracking)
+target_compile_definitions(config_tests PRIVATE
+    MCHT_COMMITTED_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/MinecraftHeadTracking.ini"
+)
+target_link_libraries(config_tests PRIVATE cameraunlock)
+if(MSVC)
+    target_compile_options(config_tests PRIVATE /W4 /WX)
+endif()
+add_test(NAME config_tests COMMAND config_tests)

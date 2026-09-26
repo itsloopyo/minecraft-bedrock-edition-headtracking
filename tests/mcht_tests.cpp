@@ -1,6 +1,6 @@
 // Tests for the parts of this mod that can run without a game attached: the
-// range checks on everything that reaches it from an ini file or a command
-// line, the render thread's frame clock, the pose and view composition the
+// range checks on the discovery duration and the launcher's command line, the
+// axis conversion to Bedrock's camera, the render thread's frame clock, the pose and view composition the
 // camera hook and the crosshair share, the crosshair projection itself, the
 // held-pose ease-out, and the pinned per-build addresses.
 //
@@ -13,13 +13,13 @@
 #include <limits>
 
 #include "aim_projection.h"
+#include "axis_signs.h"
 #include "builds/build_profile.h"
 #include "common/bounds.h"
 #include "frame_timing.h"
 #include "held_pose.h"
 #include "matrix4.h"
 #include "pose_composition.h"
-#include "tracking_settings.h"
 
 namespace mcht::builds {
 extern const BuildProfile kStoreProfile_20260806;
@@ -51,20 +51,6 @@ bool MatrixNearEqual(const float* a, const float* b, float eps = 1e-4f) {
         }
     }
     return true;
-}
-
-void TestTrackerPort() {
-    using namespace mcht::bounds;
-    Check(ValidTrackerPort(4242), "port: the OpenTrack default is accepted");
-    Check(ValidTrackerPort(kMinTrackerPort) && ValidTrackerPort(kMaxTrackerPort),
-          "port: both ends of the range are accepted");
-    // 0 binds an ephemeral port the tracker can never find; 65536 and 70000
-    // truncate through uint16_t into 0 and 4464.
-    Check(!ValidTrackerPort(0), "port: 0 is rejected rather than bound as ephemeral");
-    Check(!ValidTrackerPort(65536) && !ValidTrackerPort(70000),
-          "port: values that would truncate through uint16_t are rejected");
-    Check(!ValidTrackerPort(-1), "port: negative is rejected");
-    Check(!ValidTrackerPort(80), "port: privileged ports are rejected");
 }
 
 void TestDiscoverySeconds() {
@@ -161,66 +147,16 @@ void TestHeldPose() {
     Check(tiny.IsSettled(), "held pose: an imperceptible lean reads as settled");
 }
 
-// What applies when there is no readable ini. This is not a cosmetic default:
-// Start() hands these to the processors, whose OWN constructed defaults differ,
-// so anything wrong here is a mod that behaves differently for the user whose
-// config file could not be opened.
-void TestSettingsDefaults() {
-    using namespace mcht::tracking;
-
-    const Settings defaults;
-
-    // Bedrock's post-view transform runs pitch and roll opposite to the
-    // OpenTrack convention. The ini this mod writes says so; these are the
-    // values that apply when that ini cannot be read, and the two used to
-    // disagree - so an unreadable ini nodded and leaned the wrong way.
-    Check(defaults.Sensitivity.invert_pitch,
-          "settings: pitch is inverted by default, matching the ini the mod writes");
-    Check(defaults.Sensitivity.invert_roll,
-          "settings: roll is inverted by default, matching the ini the mod writes");
-    Check(!defaults.Sensitivity.invert_yaw, "settings: yaw is not inverted by default");
-
-    Check(NearEqual(defaults.Sensitivity.yaw, 1.0f) && NearEqual(defaults.Sensitivity.pitch, 1.0f) &&
-              NearEqual(defaults.Sensitivity.roll, 1.0f),
-          "settings: every sensitivity defaults to 1.0");
-    Check(defaults.Port == kDefaultTrackerPort && mcht::bounds::ValidTrackerPort(defaults.Port),
-          "settings: the default port is the OpenTrack one and is in range");
-    Check(defaults.YawModeKey == kDefaultYawModeKey,
-          "settings: the default yaw-mode key is Page Down");
-    Check(defaults.EnableOnStartup && defaults.PositionEnabled && defaults.WorldSpaceYaw,
-          "settings: tracking, position and world-locked yaw are all on by default");
-    Check(NearEqual(defaults.Position.limit_z, 0.40f) &&
-              NearEqual(defaults.Position.limit_z_back, 0.10f),
-          "settings: the Z limits stay asymmetric, more forward travel than back");
-
-    // These are now the single source for three things at once: the values the
-    // mod writes into a fresh ini, the fallbacks the reader passes for keys
-    // that are absent, and what applies with no ini at all. Pinned here so a
-    // change to the shared library's PositionSettings::Default cannot move this
-    // mod's behaviour without a test saying so.
-    // Zero, and it stays zero. There is no floor underneath it any more, so a
-    // player on this machine gets the tracker's own latency and nothing added.
-    Check(NearEqual(defaults.LocalSmoothing, 0.0f),
-          "settings: a tracker on this machine gets no smoothing by default, and no floor");
-    Check(NearEqual(defaults.RemoteSmoothing, 0.15f),
-          "settings: a tracker on the network gets 0.15 by default, for the jitter it adds");
-    Check(!NearEqual(defaults.LocalSmoothing, defaults.RemoteSmoothing),
-          "settings: the two defaults differ, so the connection check decides something");
-    Check(NearEqual(defaults.Position.sensitivity_x, 1.0f) &&
-              NearEqual(defaults.Position.sensitivity_y, 1.0f) &&
-              NearEqual(defaults.Position.sensitivity_z, 1.0f),
-          "settings: every position sensitivity defaults to 1.0");
-    Check(NearEqual(defaults.Position.limit_x, 0.30f) &&
-              NearEqual(defaults.Position.limit_y, 0.20f),
-          "settings: the X and Y position limits are the catalogue defaults");
-    // Position carries the same pair as rotation rather than a knob of its own,
-    // so the two pipelines cannot be tuned into disagreeing about how much lag
-    // one head movement has.
-    Check(NearEqual(defaults.Position.local_smoothing, defaults.LocalSmoothing) &&
-              NearEqual(defaults.Position.remote_smoothing, defaults.RemoteSmoothing),
-          "settings: position smoothing is the same pair rotation uses, not a separate setting");
-    Check(!defaults.Position.invert_x && !defaults.Position.invert_y && !defaults.Position.invert_z,
-          "settings: no position axis is inverted by default");
+// The conversion from the tracker's rotation to Bedrock's camera. It was the
+// shipped default of three ini settings before the canonical config, and the
+// config import drops a value a player set away from it.
+void TestAxisSigns() {
+    const cameraunlock::SensitivitySettings boundary = mcht::tracking::TrackerToBedrockRotation();
+    Check(boundary.invert_pitch && boundary.invert_roll,
+          "axis signs: pitch and roll are negated for Bedrock's post-view transform");
+    Check(!boundary.invert_yaw, "axis signs: yaw is not negated");
+    Check(boundary.yaw == 1.0f && boundary.pitch == 1.0f && boundary.roll == 1.0f,
+          "axis signs: every rotation scale is identity");
 }
 
 // The frame clock is the render thread's only measure of elapsed time, and the
@@ -695,7 +631,6 @@ int main() {
     std::cout << "===========================\n";
 
     std::cout << "Config bounds:\n";
-    TestTrackerPort();
     TestDiscoverySeconds();
     TestWaitSeconds();
 
@@ -706,8 +641,8 @@ int main() {
     std::cout << "Held pose:\n";
     TestHeldPose();
 
-    std::cout << "Settings defaults:\n";
-    TestSettingsDefaults();
+    std::cout << "Axis signs:\n";
+    TestAxisSigns();
 
     std::cout << "Matrix composition:\n";
     TestMatrixComposition();

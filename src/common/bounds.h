@@ -2,20 +2,11 @@
 
 #include <cwchar>
 
-// Range checks for the numbers that reach this mod from outside it: the INI
-// file and the launcher's command line. Header-only and free of Windows types
-// so the test binary can exercise them without linking the mod.
+// Range checks for the numbers that reach this mod from outside it: the
+// discovery duration in CameraUnlock.ini and the launcher's command line.
+// Header-only and free of Windows types so the test binary can exercise them
+// without linking the mod.
 namespace mcht::bounds {
-
-// OpenTrack's own range. 0 would bind an ephemeral port the tracker can never
-// find, and anything above 65535 truncates into an unrelated port; both look
-// from the game exactly like a tracker that is not sending.
-constexpr int kMinTrackerPort = 1024;
-constexpr int kMaxTrackerPort = 65535;
-
-inline bool ValidTrackerPort(int port) {
-    return port >= kMinTrackerPort && port <= kMaxTrackerPort;
-}
 
 // Discovery's duration is multiplied by 1000 into an int. An unbounded value
 // overflows that multiply, which is undefined behaviour, and a negative one

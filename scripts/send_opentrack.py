@@ -27,8 +27,8 @@ import time
 RATE_HZ = 60
 
 # The capture scripts stream on a separate port so a real OpenTrack instance
-# on the default 4242 cannot drown out the synthetic stream. Set the mod ini to
-# match when running them.
+# on the default 4242 cannot drown out the synthetic stream. Set UdpPort in the
+# mod's CameraUnlock.ini to match when running them.
 TEST_HOST = "127.0.0.1"
 TEST_PORT = 4243
 
