@@ -98,6 +98,19 @@ if (Test-GitTagExists -Tag $tag) {
     exit 1
 }
 
+# THIRD-PARTY-NOTICES.md names the cameraunlock-core commit compiled into the
+# release ZIP, and bumping the submodule does not touch it. Re-sync it and let
+# this release carry the correction. This runs after the preconditions above
+# because it can create a commit, and an aborted run must not leave one behind.
+& (Join-Path $projectRoot 'cameraunlock-core\scripts\sync-core-notices.ps1') -Repo $projectRoot
+if ($LASTEXITCODE -ne 0) { throw "sync-core-notices.ps1 exited $LASTEXITCODE - fix THIRD-PARTY-NOTICES.md before releasing." }
+& git -C $projectRoot diff --quiet -- THIRD-PARTY-NOTICES.md
+if ($LASTEXITCODE -ne 0) {
+    & git -C $projectRoot commit -q -m 'chore: record the cameraunlock-core commit this build compiles' -- THIRD-PARTY-NOTICES.md
+    if ($LASTEXITCODE -ne 0) { throw 'Could not commit the re-synced THIRD-PARTY-NOTICES.md.' }
+    Write-Host 'THIRD-PARTY-NOTICES.md re-synced to the pinned cameraunlock-core commit.' -ForegroundColor Yellow
+}
+
 Write-Host "Releasing $current -> $Version" -ForegroundColor Cyan
 
 Write-Host 'Generating CHANGELOG from commits...' -ForegroundColor Cyan
