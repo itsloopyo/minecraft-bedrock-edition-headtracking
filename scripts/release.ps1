@@ -82,6 +82,7 @@ try {
 }
 
 $tag = "v$Version"
+Assert-ReleaseNotBelowCanonicalSince -RepoRoot $projectRoot -Version $Version
 
 $branch = (git -C $projectRoot rev-parse --abbrev-ref HEAD).Trim()
 if ($branch -ne 'main') {
