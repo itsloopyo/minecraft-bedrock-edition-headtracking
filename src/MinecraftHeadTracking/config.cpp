@@ -90,8 +90,28 @@ cfg::ImportResult Import(const cfg::LegacyInput& input, Config& out) {
     out.yaw_mode_key_name =
         KeyList(cfg::LegacyVirtualKeyToBindings(c.yaw_mode_key, "Hotkeys", "YawModeKey", dropped), 'H');
 
-    return read == legacy::ReadStatus::Absent ? cfg::ImportResult::Absent(std::move(dropped), std::move(shaping))
-                                              : cfg::ImportResult::Imported(std::move(dropped), std::move(shaping));
+    // A row the player never changed from what v1.1.2 shipped follows Defaults.ini. The limit on
+    // lowering the head and the toggle and mode keys were never read from the file.
+    using cfg::schema::Concept;
+    cfg::LegacyFollowsDefaultsIni follows;
+    follows.Setting(Concept::UdpPort, c.port, shipped.port);
+    follows.Setting(Concept::EnableOnStartup, c.enable_on_startup, shipped.enable_on_startup);
+    follows.Setting(Concept::WorldSpaceYaw, c.world_space_yaw, shipped.world_space_yaw);
+    follows.TrackingMode(c.position_enabled, shipped.position_enabled);
+    follows.Setting(Concept::LocalSmoothing, c.local_smoothing, shipped.local_smoothing);
+    follows.Setting(Concept::RemoteSmoothing, c.remote_smoothing, shipped.remote_smoothing);
+    follows.Setting(Concept::PositionLimitX, c.position_limit_x, shipped.position_limit_x);
+    follows.Setting(Concept::PositionLimitY, c.position_limit_y, shipped.position_limit_y);
+    follows.NotInLegacy(Concept::PositionLimitYDown);
+    follows.Setting(Concept::PositionLimitZ, c.position_limit_z, shipped.position_limit_z);
+    follows.Setting(Concept::PositionLimitZBack, c.position_limit_z_back, shipped.position_limit_z_back);
+    follows.NotInLegacy(Concept::ToggleKey);
+    follows.NotInLegacy(Concept::CycleTrackingModeKey);
+    follows.Setting(Concept::YawModeKey, c.yaw_mode_key, shipped.yaw_mode_key);
+
+    return read == legacy::ReadStatus::Absent
+               ? cfg::ImportResult::Absent(std::move(dropped), std::move(shaping), follows.Concepts())
+               : cfg::ImportResult::Imported(std::move(dropped), std::move(shaping), follows.Concepts());
 }
 
 }  // namespace

@@ -22,9 +22,18 @@
 // number it read into a range the canonical rows hold, and refused no file, so no input is
 // deferred or refused.
 //
-// Comparison 2 runs twice, once over a Defaults.ini at the built-in values and once over one a
-// player changed, since the migration writes default exactly where the imported value equals
-// what Defaults.ini gives. After every load MinecraftHeadTracking.ini keeps its bytes, its write
+// A row the player never changed from what v1.1.2 shipped follows Defaults.ini: the import lists
+// it in follows_defaults_ini and the migration writes it default, the tracking mode pair as one
+// unit. The test derives that set from the frozen reader's values and holds the import's list to
+// it on every input; every first-run file, the empty file and no file leave every row to
+// Defaults.ini and migrate to the committed file byte for byte.
+//
+// A YawModeKey on a bare Ctrl, Shift or Alt key is unbound and recorded as ModifierKey (core's
+// N3), and the player keeps Ctrl+Shift+H.
+//
+// Comparison 2 runs twice, once over a Defaults.ini at the built-in values, where the session
+// runs as the import read, and once over one a player changed, where a row the player never
+// changed takes Defaults.ini's value and a changed row keeps the player's. After every load MinecraftHeadTracking.ini keeps its bytes, its write
 // time and its attributes, Defaults.ini is never written, and the folder holds the legacy file
 // and CameraUnlock.ini and nothing else. The next load reads CameraUnlock.ini, imports nothing
 // and writes nothing, and a read-only legacy file imports as a writable one does.
@@ -88,6 +97,9 @@ void Check(bool cond, const std::string& what) {
 }
 
 bool SameBits(float a, float b) { return std::memcmp(&a, &b, sizeof a) == 0; }
+
+// Shift, Ctrl, Alt and their left and right keys, which core's N3 unbinds on import.
+bool IsModifierKey(int vk) { return (vk >= 0x10 && vk <= 0x12) || (vk >= 0xA0 && vk <= 0xA5); }
 
 std::string ReadBytes(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
@@ -340,6 +352,15 @@ std::vector<Input> Inputs(const std::vector<std::pair<std::string, std::string>>
     for (auto& m : GenerateIniMutations(firstRuns.back().second, mcht::legacy::ReadKeys(), MutationKeys())) {
         inputs.push_back({"corpus: " + m.name, std::move(m.bytes)});
     }
+    // v1.1.2 read any code from 0x01 to 0xFE, a bare Shift, Ctrl or Alt among them.
+    for (const char* code : {"0x10", "0x11", "0x12", "0xA0", "0xA5"}) {
+        std::string bytes = firstRuns.back().second;
+        const std::string from = "YawModeKey=0x22";
+        const size_t at = bytes.find(from);
+        if (at == std::string::npos) throw std::logic_error("the first-run output has no YawModeKey=0x22");
+        bytes.replace(at, from.size(), std::string("YawModeKey=") + code);
+        inputs.push_back({std::string("YawModeKey on a modifier key, ") + code, std::move(bytes)});
+    }
     return inputs;
 }
 
@@ -476,7 +497,14 @@ struct Tally {
         int with_values = 0;
     } builtin, altered;
     int with_pose_shaping_dropped = 0;
+    int with_modifier_dropped = 0;
+    // Inputs with a row the player changed, and of those the ones that changed the tracking mode.
+    int touched = 0;
+    int mode_touched = 0;
 };
+
+// The settings a fresh install starts on over the changed Defaults.ini.
+Config g_alteredConfig;
 
 // Every sensitivity and inversion the frozen reader read is listed in its place, folded where it
 // holds the value v1.1.2 shipped and dropped as PoseShaping where it does not, and nothing is
@@ -517,10 +545,109 @@ void CheckDrops(const std::string& name, const mcht::legacy::Config& l, const Im
         if (!reads[k].atShipped) anyDropped = true;
     }
     if (anyDropped) ++tally.with_pose_shaping_dropped;
+    bool modifierDropped = false;
     for (const DroppedValue& d : imported.dropped) {
+        if (d.rule == DropRule::ModifierKey && d.section == "Hotkeys" && d.key == "YawModeKey") {
+            modifierDropped = true;
+            continue;
+        }
         Check(d.rule == DropRule::PoseShaping,
               name + ": the import drops [" + d.section + "] " + d.key + " by a rule this map never applies");
     }
+    Check(modifierDropped == IsModifierKey(l.yaw_mode_key),
+          name + ": a YawModeKey on a Ctrl, Shift or Alt key is recorded as ModifierKey, and no other is");
+    if (modifierDropped) ++tally.with_modifier_dropped;
+}
+
+// ---- Rows that follow Defaults.ini ------------------------------------------------------------
+
+using cfg::schema::Concept;
+
+// Every row of the table that follows Defaults.ini.
+const std::set<Concept>& AllRows() {
+    static const std::set<Concept> all = {
+        Concept::UdpPort,         Concept::EnableOnStartup,    Concept::WorldSpaceYaw,   Concept::RotationEnabled,
+        Concept::PositionEnabled, Concept::LocalSmoothing,     Concept::RemoteSmoothing, Concept::PositionLimitX,
+        Concept::PositionLimitY,  Concept::PositionLimitYDown, Concept::PositionLimitZ,  Concept::PositionLimitZBack,
+        Concept::ToggleKey,       Concept::CycleTrackingModeKey, Concept::YawModeKey,
+    };
+    return all;
+}
+
+// The rows the player never changed: each value the frozen reader read that is what v1.1.2
+// shipped, the mode pair both or neither. PositionLimitYDown and the toggle and mode keys were
+// never read from the file.
+std::set<Concept> UntouchedRows(const mcht::legacy::Config& l) {
+    const mcht::legacy::Config shipped;
+    std::set<Concept> changed;
+    if (l.port != shipped.port) changed.insert(Concept::UdpPort);
+    if (l.enable_on_startup != shipped.enable_on_startup) changed.insert(Concept::EnableOnStartup);
+    if (l.world_space_yaw != shipped.world_space_yaw) changed.insert(Concept::WorldSpaceYaw);
+    if (l.position_enabled != shipped.position_enabled) {
+        changed.insert(Concept::RotationEnabled);
+        changed.insert(Concept::PositionEnabled);
+    }
+    if (!SameBits(l.local_smoothing, shipped.local_smoothing)) changed.insert(Concept::LocalSmoothing);
+    if (!SameBits(l.remote_smoothing, shipped.remote_smoothing)) changed.insert(Concept::RemoteSmoothing);
+    if (!SameBits(l.position_limit_x, shipped.position_limit_x)) changed.insert(Concept::PositionLimitX);
+    if (!SameBits(l.position_limit_y, shipped.position_limit_y)) changed.insert(Concept::PositionLimitY);
+    if (!SameBits(l.position_limit_z, shipped.position_limit_z)) changed.insert(Concept::PositionLimitZ);
+    if (!SameBits(l.position_limit_z_back, shipped.position_limit_z_back)) changed.insert(Concept::PositionLimitZBack);
+    if (l.yaw_mode_key != shipped.yaw_mode_key) changed.insert(Concept::YawModeKey);
+    std::set<Concept> untouched;
+    for (const Concept row : AllRows()) {
+        if (!changed.count(row)) untouched.insert(row);
+    }
+    return untouched;
+}
+
+std::string Names(const std::set<Concept>& rows) {
+    std::string text;
+    for (const Concept row : rows) {
+        text += (text.empty() ? "" : ", ") + std::string(cfg::schema::kConcepts[static_cast<std::size_t>(row)].name);
+    }
+    return text.empty() ? "none" : text;
+}
+
+// `want` with each row in `follows` as `defaults` holds it.
+Config OverDefaults(Config want, const std::set<Concept>& follows, const Config& defaults) {
+    for (const Concept row : follows) {
+        switch (row) {
+            case Concept::UdpPort: want.udp_port = defaults.udp_port; break;
+            case Concept::EnableOnStartup: want.enable_on_startup = defaults.enable_on_startup; break;
+            case Concept::WorldSpaceYaw: want.world_space_yaw = defaults.world_space_yaw; break;
+            case Concept::RotationEnabled: want.rotation_enabled = defaults.rotation_enabled; break;
+            case Concept::PositionEnabled: want.position_enabled = defaults.position_enabled; break;
+            case Concept::LocalSmoothing:
+                want.local_smoothing = defaults.local_smoothing;
+                want.position.local_smoothing = defaults.position.local_smoothing;
+                break;
+            case Concept::RemoteSmoothing:
+                want.remote_smoothing = defaults.remote_smoothing;
+                want.position.remote_smoothing = defaults.position.remote_smoothing;
+                break;
+            case Concept::PositionLimitX: want.position.limit_x = defaults.position.limit_x; break;
+            case Concept::PositionLimitY: want.position.limit_y = defaults.position.limit_y; break;
+            case Concept::PositionLimitYDown: want.position.limit_y_down = defaults.position.limit_y_down; break;
+            case Concept::PositionLimitZ: want.position.limit_z = defaults.position.limit_z; break;
+            case Concept::PositionLimitZBack: want.position.limit_z_back = defaults.position.limit_z_back; break;
+            case Concept::ToggleKey: want.toggle_key_name = defaults.toggle_key_name; break;
+            case Concept::CycleTrackingModeKey:
+                want.cycle_tracking_mode_key_name = defaults.cycle_tracking_mode_key_name;
+                break;
+            case Concept::YawModeKey: want.yaw_mode_key_name = defaults.yaw_mode_key_name; break;
+            default:
+                throw std::logic_error(std::string("no field for ") +
+                                       cfg::schema::kConcepts[static_cast<std::size_t>(row)].name);
+        }
+    }
+    return want;
+}
+
+// Every file a published build wrote, and the two inputs with nothing in them: none holds a value
+// v1.1.2 did not ship, so every row follows Defaults.ini and the migration gives the committed file.
+bool IsUnedited(const Input& input) {
+    return input.name.rfind("first-run output ", 0) == 0 || input.name == "no file" || input.name == "empty file";
 }
 
 // The settings the mod starts on after the migration against the ones v1.1.2 started on from the
@@ -558,7 +685,8 @@ std::vector<std::string> StartupDifferences(const mcht::legacy::Config& l, const
     }
     if (m.run_discovery != l.discovery_enabled) d.push_back("RunDiscovery");
     if (m.discovery_seconds != l.discovery_seconds) d.push_back("DurationSeconds");
-    const mcht_oracle_view::FireTable before = mcht_oracle_view::OracleFires(l.yaw_mode_key);
+    const mcht_oracle_view::FireTable before =
+        mcht_oracle_view::OracleFires(IsModifierKey(l.yaw_mode_key) ? 0 : l.yaw_mode_key);
     const mcht_oracle_view::FireTable after = CurrentFires(m);
     if (before != after) d.push_back("hotkeys: " + FirstFireDifference(before, after));
     return d;
@@ -576,8 +704,10 @@ bool Contains(const std::vector<std::string>& lines, const std::string& text) {
     return false;
 }
 
-void Comparison2(Scratch& scratch, const Input& input, const ImportRun& import, const ImportResult* mapped,
-                 const fs::path& defaults, Tally& tally) {
+// Returns the settings the migration starts on. `overBuiltin` is what it started on over the
+// built-in Defaults.ini, for the run over the changed one.
+Config Comparison2(Scratch& scratch, const Input& input, const ImportRun& import, const ImportResult* mapped,
+                   const fs::path& defaults, const Config* overBuiltin, Tally& tally) {
     const bool builtin = defaults == g_builtinDefaults;
     Tally::Run& run = builtin ? tally.builtin : tally.altered;
     const std::string name =
@@ -603,23 +733,39 @@ void Comparison2(Scratch& scratch, const Input& input, const ImportRun& import, 
         if (builtin) {
             const std::vector<std::string> d = StartupDifferences(import.config, loaded.config);
             Check(d.empty(), name + ": comparison 2: " + Join(d));
+        } else {
+            Check(AllValues(loaded.config) == AllValues(g_alteredConfig),
+                  name + ": a fresh install does not start on the changed Defaults.ini");
         }
-        return;
+        return loaded.config;
     }
 
     Check(Stamp(legacyFile) == legacyBefore,
           name + ": MinecraftHeadTracking.ini did not keep its bytes, write time and attributes");
-    if (builtin) CheckDrops(name, import.config, *mapped, tally);
-
-    {
+    const std::set<Concept> follows(mapped->follows_defaults_ini.begin(), mapped->follows_defaults_ini.end());
+    if (builtin) {
+        CheckDrops(name, import.config, *mapped, tally);
+        Check(follows.size() == mapped->follows_defaults_ini.size(), name + ": follows_defaults_ini names a row twice");
+        const std::set<Concept> untouched = UntouchedRows(import.config);
+        Check(follows == untouched, name + ": the rows left to Defaults.ini are " + Names(follows) +
+                                        ", not the ones the player never changed, " + Names(untouched));
+        if (untouched != AllRows()) ++tally.touched;
+        if (!untouched.count(Concept::RotationEnabled)) ++tally.mode_touched;
+        if (IsUnedited(input)) Check(untouched == AllRows(), name + ": a row does not follow Defaults.ini");
         const std::vector<std::string> d = StartupDifferences(import.config, loaded.config);
         Check(d.empty(), name + ": comparison 2: " + Join(d));
+    } else {
+        // Over the changed Defaults.ini a row the player never changed takes its value, and a
+        // changed row keeps the one the migration gave it over the built-in Defaults.ini.
+        Check(AllValues(loaded.config) == AllValues(OverDefaults(*overBuiltin, follows, g_alteredConfig)),
+              name + ": over the changed Defaults.ini an untouched row does not take its value, or a changed "
+                     "row does not keep the player's");
     }
 
     ++run.imported;
     Check(loaded.status == ConfigLoadStatus::Migrated,
           name + ": the migration is " + cfg::ConfigLoadStatusName(loaded.status) + ": " + loaded.reason);
-    if (loaded.status != ConfigLoadStatus::Migrated) return;
+    if (loaded.status != ConfigLoadStatus::Migrated) return loaded.config;
     Check(after.size() == 2 && after[0].first == mcht::config::kConfigFileName && after[1].first == kFileName &&
               after[1].second == *input.bytes,
           name + ": the folder does not hold MinecraftHeadTracking.ini and CameraUnlock.ini and nothing else");
@@ -628,6 +774,12 @@ void Comparison2(Scratch& scratch, const Input& input, const ImportRun& import, 
     tally.migrated.insert(migrated);
     if (migrated.find("=default\r\n") != std::string::npos) ++run.with_default_rows;
     if (migrated != tally.committed) ++run.with_values;
+    if (IsUnedited(input)) Check(migrated == tally.committed, name + ": does not migrate to the committed file");
+    for (const Concept row : follows) {
+        const std::string key = cfg::schema::kConcepts[static_cast<std::size_t>(row)].key;
+        Check(migrated.find("\r\n" + key + "=default\r\n") != std::string::npos,
+              name + ": " + key + " is not written default");
+    }
 
     // The next launch reads CameraUnlock.ini over the same Defaults.ini, with nothing to report,
     // to the same settings, does not import, and writes neither file.
@@ -657,6 +809,7 @@ void Comparison2(Scratch& scratch, const Input& input, const ImportRun& import, 
         Check(Stamp(roLegacy) == roBefore && (roBefore.attributes & FILE_ATTRIBUTE_READONLY) != 0,
               name + ": a read-only MinecraftHeadTracking.ini did not keep its attribute, bytes and write time");
     }
+    return loaded.config;
 }
 
 // Defaults.ini as a player may have changed it, from the one the owner created: every value this
@@ -710,6 +863,13 @@ int main() {
             Check(fs::exists(g_builtinDefaults), "the first load did not create Defaults.ini");
         }
         WriteAlteredDefaults();
+        {
+            const fs::path dir = scratch.Clean("altered-fresh");
+            const cfg::ConfigLoadResult<Config> fresh = cfg::ConfigOwner<Config>(OwnerOptions(dir, g_alteredDefaults)).Load();
+            Check(fresh.status == ConfigLoadStatus::Created && fresh.diagnostics.empty(),
+                  "a fresh install over the changed Defaults.ini is not Created cleanly");
+            g_alteredConfig = fresh.config;
+        }
 
         // The first-run output of every published build, extracted once from each and
         // committed as test data. The last is what v1.1.0 and v1.1.2 write too, and so what
@@ -750,9 +910,9 @@ int main() {
                 mapped = RunMappedImport(scratch, input);
                 Check(mapped->status == ImportStatus::Imported, input.name + ": the mapped import is not Imported");
             }
-            for (const fs::path& defaults : {g_builtinDefaults, g_alteredDefaults}) {
-                Comparison2(scratch, input, import, mapped ? &*mapped : nullptr, defaults, tally);
-            }
+            const Config overBuiltin =
+                Comparison2(scratch, input, import, mapped ? &*mapped : nullptr, g_builtinDefaults, nullptr, tally);
+            Comparison2(scratch, input, import, mapped ? &*mapped : nullptr, g_alteredDefaults, &overBuiltin, tally);
         }
         std::printf("  %d inputs take the [Discovery] branch\n", discovery);
         Check(discovery > 0, "no input takes the [Discovery] branch");
@@ -768,6 +928,13 @@ int main() {
         std::printf("  %d with a changed sensitivity or inversion dropped (pose_shaping)\n",
                     tally.with_pose_shaping_dropped);
         Check(tally.with_pose_shaping_dropped > 0, "no input drops a changed pose-shaping value");
+        std::printf("  %d with a YawModeKey on a Ctrl, Shift or Alt key unbound (ModifierKey)\n",
+                    tally.with_modifier_dropped);
+        Check(tally.with_modifier_dropped > 0, "no input binds YawModeKey to a Ctrl, Shift or Alt key");
+        std::printf("  %d inputs change a row from v1.1.2's default, %d of them the tracking mode\n", tally.touched,
+                    tally.mode_touched);
+        Check(tally.touched > 0 && tally.mode_touched > 0,
+              "no input changes a row, the tracking mode among them, which then does not follow Defaults.ini");
         Check(tally.migrated.count(tally.committed) == 1, "no input migrated to the committed file");
 
         wchar_t exe[MAX_PATH];
