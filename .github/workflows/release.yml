@@ -106,6 +106,15 @@ jobs:
             exit 1
           }
 
+      - name: Config differential test
+        shell: pwsh
+        run: |
+          pixi run test-differential
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::pixi run test-differential failed"
+            exit 1
+          }
+
       - name: Generate release notes
         shell: pwsh
         run: |

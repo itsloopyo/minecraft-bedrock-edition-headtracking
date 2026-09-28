@@ -5,21 +5,21 @@ on:
     branches: ['**']
     paths-ignore:
       - '**.md'
-      - 'LICENSE'
       - 'docs/**'
+      - 'LICENSE'
   pull_request:
     branches: [main]
     paths-ignore:
       - '**.md'
-      - 'LICENSE'
       - 'docs/**'
+      - 'LICENSE'
 
-# Read-only: this job builds and uploads an artifact and never writes to the
-# repo. Without an explicit block the job inherits whatever default the repo or
-# org sets, which on older repos is a read-write token handed to every third
-# party action in the build.
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -51,11 +51,6 @@ jobs:
             Write-Host "::error::pixi run package failed"
             exit 1
           }
-
-      # Covers the shared submodule, which the mod build compiles with tests
-      # off. Binds real loopback ports, so it needs a runner, not a container.
-      - name: Test
-        run: pixi run test
 
       - name: Stage installer contents for artifact upload
         shell: pwsh

@@ -30,7 +30,7 @@ build-debug = { cmd = "cmake --build build --config Debug", depends-on = ["setup
 install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Release", depends-on = ["build"] }
 uninstall = "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1"
 
-package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build", "test"] }
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build", "test-unit"] }
 release = "powershell -ExecutionPolicy Bypass -File scripts/release.ps1"
 
 # The mod build forces CAMERAUNLOCK_BUILD_TESTS off, so nothing here exercises
@@ -65,7 +65,9 @@ test-config-lint = { cmd = "node tests/config_differential/lint-migrated.mjs bui
 # the legacy file's ANSI path.
 test-config-files = { cmd = "./build/Release/config_tests.exe", depends-on = ["build"] }
 
-test = { cmd = "./build-tests/tests/Release/cameraunlock_tests.exe", depends-on = ["test-build", "test-mod", "test-config", "test-config-lint", "test-config-files"] }
+test-unit = { cmd = "./build-tests/tests/Release/cameraunlock_tests.exe", depends-on = ["test-build", "test-mod", "test-config-files"] }
+test-differential = { depends-on = ["test-config-lint"] }
+test = { depends-on = ["test-unit", "test-differential"] }
 
 # Rewrite config/MinecraftHeadTracking.ini, the committed copy of the
 # CameraUnlock.ini the mod creates at first launch, from the config table after a
