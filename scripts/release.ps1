@@ -45,17 +45,6 @@ if ($Version -eq 'nightly') {
 
 Import-Module (Join-Path $projectRoot 'cameraunlock-core\powershell\ReleaseWorkflow.psm1') -Force
 
-# Mirrors New-ChangelogFromCommits' insertion so a -Force maintenance entry
-# lands in the same place with the same shape.
-function Add-MaintenanceChangelogEntry {
-    param([string]$Path, [string]$NewVersion)
-    $date = Get-Date -Format 'yyyy-MM-dd'
-    $entry = "## [$NewVersion] - $date`n`n### Changed`n`n- Maintenance release (no user-facing changes).`n`n"
-    $changelog = Get-Content $Path -Raw
-    $changelog = $changelog -replace '(?s)(# Changelog.*?\n\n)', "`$1$entry"
-    Set-Content $Path ($changelog.TrimEnd() + "`n") -NoNewline
-}
-
 $pixiPath = Join-Path $projectRoot 'pixi.toml'
 $changelogPath = Join-Path $projectRoot 'CHANGELOG.md'
 
@@ -121,15 +110,13 @@ try {
         Version       = $Version
         ArtifactPaths = @('src/', 'cameraunlock-core', 'CMakeLists.txt', 'launcher-manifest.json', 'scripts/deploy.ps1', 'scripts/uninstall.ps1')
     }
-    New-ChangelogFromCommits @changelogArgs | Out-Null
+    New-ChangelogFromCommits @changelogArgs -Maintenance:$Force | Out-Null
 } catch {
+    Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
     if (-not $Force) {
-        Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host 'No user-facing changes to release. Re-run with -Force for a maintenance release.' -ForegroundColor Yellow
-        exit 1
     }
-    Write-Host 'No user-facing commits since last tag - writing maintenance entry (-Force).' -ForegroundColor Yellow
-    Add-MaintenanceChangelogEntry -Path $changelogPath -NewVersion $Version
+    exit 1
 }
 
 Write-Host "Updating pixi.toml to $Version..." -ForegroundColor Cyan
