@@ -158,8 +158,9 @@ bool EaseOutHeldPose(std::chrono::steady_clock::time_point now, mcht::camera::Po
 }
 
 // No fresh data: hold, do not snap. Smoothing blends back naturally when data
-// resumes. The frame clock is deliberately not advanced, so the delta the next
-// real sample is processed with spans the whole gap.
+// resumes. The frame clock is deliberately not advanced, so the next real
+// sample measures the whole gap, and a gap longer than a frame is treated as a
+// stall rather than fed to the smoothing (NormalizeFrameDelta).
 bool HoldLastPose(mcht::camera::Pose& out) {
     if (!g_held.Valid) {
         return false;
@@ -168,16 +169,18 @@ bool HoldLastPose(mcht::camera::Pose& out) {
     return true;
 }
 
-cameraunlock::math::Vec3 ProcessPositionOffset(TrackingMode mode, bool havePosition,
+cameraunlock::math::Vec3 ProcessPositionOffset(bool havePosition,
                                                const cameraunlock::PositionData& raw,
+                                               bool freshSample,
                                                const cameraunlock::TrackingPose& pose,
                                                float delta) {
-    if (mode == TrackingMode::RotationOnly || !havePosition) {
+    if (!havePosition) {
         return {};
     }
     const cameraunlock::math::Quat4 rotationQuat =
         cameraunlock::math::Quat4::FromYawPitchRoll(pose.yaw, pose.pitch, pose.roll);
-    const cameraunlock::PositionData smoothRaw = g_positionInterpolator.Update(raw, delta);
+    const cameraunlock::PositionData smoothRaw =
+        g_positionInterpolator.Update(raw, freshSample, delta);
     return g_positionProcessor.Process(smoothRaw, rotationQuat, delta);
 }
 
@@ -203,15 +206,6 @@ bool ProvidePose(mcht::camera::Pose& out) {
 
     const float delta = g_frameClock.Advance(now);
 
-    // GetPosition already returns metres: the packet parser converts
-    // OpenTrack's centimetres on the way in. Scaling again here made a 10cm
-    // head movement 0.0001m, which is what left the mod at 3DOF.
-    float px = 0.0f;
-    float py = 0.0f;
-    float pz = 0.0f;
-    const bool havePosition = g_receiver.GetPosition(px, py, pz);
-    const cameraunlock::PositionData raw(px, py, pz);
-
     // A sample is "new" when the receiver's timestamp moves; the hook runs far
     // faster than packets arrive, so most frames are interpolated rather than
     // fed a fresh sample.
@@ -219,21 +213,38 @@ bool ProvidePose(mcht::camera::Pose& out) {
     const bool freshSample = sampleAt != g_lastSampleAt;
     g_lastSampleAt = sampleAt;
 
+    // GetPosition already returns metres: the packet parser converts
+    // OpenTrack's centimetres on the way in. Scaling again here made a 10cm
+    // head movement 0.0001m, which is what left the mod at 3DOF.
+    //
+    // Stamped with the packet's receive time, not the frame's: the three-float
+    // constructor stamps "now", which the interpolator reads as a new sample on
+    // every frame, so it never interpolated between packets at all.
+    float px = 0.0f;
+    float py = 0.0f;
+    float pz = 0.0f;
+    const bool havePosition = g_receiver.GetPosition(px, py, pz);
+    const cameraunlock::PositionData raw(px, py, pz, sampleAt);
+
     const cameraunlock::InterpolatedPose smooth =
         g_poseInterpolator.Update(yaw, pitch, roll, freshSample, delta);
 
     const cameraunlock::TrackingPose pose =
         g_processor.Process(smooth.yaw, smooth.pitch, smooth.roll, delta);
 
-    const TrackingMode mode = g_trackingMode.load(std::memory_order_relaxed);
-    const cameraunlock::math::Vec3 offset =
-        ProcessPositionOffset(mode, havePosition, raw, pose, delta);
+    const cameraunlock::math::Vec3 position =
+        ProcessPositionOffset(havePosition, raw, freshSample, pose, delta);
 
-    // The processor keeps running while rotation is suppressed, so its
-    // smoothing state is current the moment the cycle brings rotation back.
+    // Both processors keep running while the mode suppresses their half, so
+    // their smoothing state is current the moment the cycle brings it back,
+    // rather than gliding in from wherever the head was when it was switched
+    // off.
+    const TrackingMode mode = g_trackingMode.load(std::memory_order_relaxed);
     const bool rotationActive = mode != TrackingMode::PositionOnly;
+    const bool positionActive = mode != TrackingMode::RotationOnly;
     g_held.Set(rotationActive ? pose.yaw : 0.0f, rotationActive ? pose.pitch : 0.0f,
-               rotationActive ? pose.roll : 0.0f, offset);
+               rotationActive ? pose.roll : 0.0f,
+               positionActive ? position : cameraunlock::math::Vec3{});
 
     BuildHeldPose(out);
     return true;
