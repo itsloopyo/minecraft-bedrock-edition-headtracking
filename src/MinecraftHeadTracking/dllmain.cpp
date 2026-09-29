@@ -105,8 +105,11 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         if (thread) {
             CloseHandle(thread);
         }
-    } else if (reason == DLL_PROCESS_DETACH) {
-        cameraunlock::logging::Close();
     }
+    // Nothing on DLL_PROCESS_DETACH. The DLL is never unloaded while the game
+    // runs, and at process exit the other threads have already been killed, so
+    // closing the log would take a lock one of them may have died holding and
+    // hang the game on quit. The OS closes the handle, and every line already
+    // went to the file unbuffered.
     return TRUE;
 }
