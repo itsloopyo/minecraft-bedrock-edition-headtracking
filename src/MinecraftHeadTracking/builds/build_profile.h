@@ -89,8 +89,7 @@ inline bool ProfileIsComplete(const BuildProfile& profile) {
 }
 
 // Append-only, newest build first. The top entry is the diagnostic primary
-// that words the "newer than / older than" line, and the profile an
-// unrecognised build takes its fairness offsets from. Declared beside the
+// that words the "newer than / older than" line. Declared beside the
 // profiles rather than beside the selection logic so that answering a patch is
 // one edit in one file.
 extern const BuildProfile* const kKnownProfiles[];

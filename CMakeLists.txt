@@ -276,3 +276,14 @@ if(MSVC)
     target_compile_options(config_tests PRIVATE /W4 /WX)
 endif()
 add_test(NAME config_tests COMMAND config_tests)
+
+add_executable(build_registry_tests
+    tests/build_registry_tests.cpp
+    src/MinecraftHeadTracking/builds/build_registry.cpp
+)
+target_include_directories(build_registry_tests PRIVATE src/MinecraftHeadTracking)
+target_link_libraries(build_registry_tests PRIVATE cameraunlock)
+if(MSVC)
+    target_compile_options(build_registry_tests PRIVATE /W4 /WX)
+endif()
+add_test(NAME build_registry_tests COMMAND build_registry_tests)

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Unrecognised Minecraft builds now start with head tracking disabled instead of using an older build's offsets. This prevents the startup crash on Minecraft for Windows 1.26.5203.0. Tracking on that build requires a verified profile.
+
 ### Added
 
 - A setting set to `default` in `CameraUnlock.ini` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads. Head tracking mods that keep their settings in another file do not read it, and neither do earlier versions of this mod. Writing a value in place of `default` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.
