@@ -48,7 +48,8 @@ void BootstrapBody() {
     // this image. A build it cannot be recovered from leaves the game running
     // exactly vanilla.
     const mcht::builds::SelectResult result = mcht::builds::SelectProfile();
-    if (result != mcht::builds::SelectResult::Matched) {
+    if (result != mcht::builds::SelectResult::Matched &&
+        result != mcht::builds::SelectResult::Resolved) {
         cameraunlock::logging::Line("Dormant. No hooks installed.");
         return;
     }

@@ -19,13 +19,15 @@ void Check(bool condition, const char* message) {
     }
 }
 
-void RejectWithoutResolving(const cameraunlock::memory::PeFingerprint& fingerprint) {
+void ResolveUnknown(const cameraunlock::memory::PeFingerprint& fingerprint) {
     profiles[0].Fingerprint = fingerprint;
     codeCalls = layoutCalls = 0;
-    Check(mcht::builds::SelectProfile() == mcht::builds::SelectResult::Unresolved,
-          "Unverified build was accepted");
-    Check(codeCalls == 0 && layoutCalls == 0, "Unverified build reached camera resolution");
-    Check(!mcht::builds::ActiveCode().Complete(), "Unverified build retained camera addresses");
+    Check(mcht::builds::SelectProfile() == mcht::builds::SelectResult::Resolved,
+          "Compatible camera was rejected because its fingerprint changed");
+    Check(codeCalls == 1 && layoutCalls == 1, "Unknown build skipped camera validation");
+    Check(!mcht::builds::KnownBuild(), "Unknown build was labelled verified");
+    Check(mcht::builds::ActiveProfile().Offsets.Session.ClientInstanceGetLevel == 0,
+          "Unknown build borrowed stale session offsets");
 }
 
 }  // namespace
@@ -35,9 +37,8 @@ namespace mcht::builds {
 const BuildProfile* const kKnownProfiles[] = {&profiles[0], &profiles[1]};
 extern const std::size_t kKnownProfileCount = 2;
 
-bool ResolveCode(ResolvedCode& out, std::uint32_t slot) {
+bool ResolveCode(ResolvedCode& out) {
     ++codeCalls;
-    Check(slot == 0x538, "Wrong profile used for code resolution");
     out.CameraSetup = 1;
     out.GetRenderCameraComponent = 2;
     return codeSucceeds;
@@ -64,24 +65,25 @@ int main() {
     profiles[1] = profiles[0];
     profiles[1].Name = "test-older";
 
-    RejectWithoutResolving({0x6AB54E37, 0x12C01000, 0x128CD801});
+    ResolveUnknown({0x6AB54E37, 0x12C01000, 0x128CD801});
     auto mismatch = running;
     ++mismatch.TimeDateStamp;
-    RejectWithoutResolving(mismatch);
+    ResolveUnknown(mismatch);
     mismatch = running;
     --mismatch.TimeDateStamp;
-    RejectWithoutResolving(mismatch);
+    ResolveUnknown(mismatch);
     mismatch = running;
     ++mismatch.SizeOfImage;
-    RejectWithoutResolving(mismatch);
+    ResolveUnknown(mismatch);
     mismatch = running;
     ++mismatch.CheckSum;
-    RejectWithoutResolving(mismatch);
+    ResolveUnknown(mismatch);
 
     profiles[0].Offsets = {};
-    RejectWithoutResolving(running);
+    ResolveUnknown(running);
     profiles[0].Offsets = profiles[1].Offsets;
     profiles[0].Fingerprint = running;
+    codeCalls = layoutCalls = 0;
     Check(SelectProfile() == SelectResult::Matched, "Known build was rejected");
     Check(&ActiveProfile() == &profiles[0], "Wrong active profile");
     Check(codeCalls == 1 && layoutCalls == 1, "Known build did not resolve its camera");

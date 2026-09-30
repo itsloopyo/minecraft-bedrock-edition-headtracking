@@ -9,7 +9,6 @@
 
 namespace mcht::builds {
 
-using cameraunlock::memory::FingerprintMismatch;
 using cameraunlock::memory::PeFingerprint;
 
 namespace {
@@ -17,32 +16,13 @@ namespace {
 const BuildProfile* g_active = nullptr;
 ResolvedCode g_code;
 ResolvedLayout g_layout;
-
-void LogMismatch(const PeFingerprint& running) {
-    const BuildProfile& primary = *kKnownProfiles[0];
-    switch (cameraunlock::memory::ClassifyMismatch(running, primary.Fingerprint)) {
-        case FingerprintMismatch::Newer:
-            cameraunlock::logging::Line(
-                "  Your Minecraft is newer than any build this mod was tested on. Check for a mod update.");
-            break;
-        case FingerprintMismatch::Older:
-            cameraunlock::logging::Line(
-                "  Your Minecraft is older than any build this mod was tested on. Let the "
-                "Microsoft Store finish updating the game.");
-            break;
-        case FingerprintMismatch::Differs:
-            cameraunlock::logging::Line(
-                "  Your Minecraft has the expected build date but a different size or "
-                "checksum, so it is a repacked or modified executable.");
-            break;
-    }
-}
+BuildProfile g_resolved = {"runtime-validated", {}, {}};
 
 // The camera, recovered from the running image. Both halves come from the
 // image itself, so a patch that moves or reshapes the camera is answered here
 // rather than by appending anything.
-bool RecoverCamera(const BuildProfile& sessionLayout) {
-    if (!ResolveCode(g_code, sessionLayout.Offsets.Session.ClientInstanceGetLevel)) {
+bool RecoverCamera() {
+    if (!ResolveCode(g_code)) {
         return false;
     }
     return ResolveLayout(g_code.CameraSetup, g_layout);
@@ -89,31 +69,29 @@ SelectResult SelectProfile() {
             recognised->Name);
     } else if (matched == nullptr) {
         cameraunlock::logging::Line("No build profile matches this Minecraft.");
-        LogMismatch(running);
+        cameraunlock::logging::Line("Validating compatibility against the running game.");
     }
 
-    // A recovered camera does not validate the session vtable. Calling a stale
-    // slot can write through an argument the caller never supplied.
-    if (matched == nullptr) {
-        cameraunlock::logging::Line(
-            "No verified session layout for this build. Head tracking is disabled; the game runs unmodified.");
-        return SelectResult::Unresolved;
-    }
-
-    if (!RecoverCamera(*matched)) {
+    if (!RecoverCamera()) {
         cameraunlock::logging::Line(
             "The camera could not be recovered from this build. Staying dormant; the game runs "
             "unmodified.");
         return SelectResult::Unresolved;
     }
 
-    g_active = matched;
-    cameraunlock::logging::Line("Activated build profile %s", matched->Name);
-    return SelectResult::Matched;
+    g_resolved.Fingerprint = running;
+    g_active = matched ? matched : &g_resolved;
+    cameraunlock::logging::Line("Camera resolved for %s. Session access will be validated before tracking.",
+                                g_active->Name);
+    return matched ? SelectResult::Matched : SelectResult::Resolved;
 }
 
 const BuildProfile& ActiveProfile() {
     return *g_active;
+}
+
+bool KnownBuild() {
+    return g_active != &g_resolved;
 }
 
 const ResolvedCode& ActiveCode() {

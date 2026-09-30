@@ -265,13 +265,12 @@ launcher, or it stops after the first few lines.
   runs completely vanilla.
 - Minecraft has to be the Microsoft Store build of Minecraft for
   Windows. Java Edition is a different game and is not supported.
-- After a Minecraft update the log says the running build is not recognised.
-  The mod keeps working: it finds the camera in the running game rather than
-  from a table of addresses, so a patch that moves or reshapes the camera is
-  absorbed at load time. If it cannot find the camera it stays dormant on
-  purpose, rather than hooking stale addresses and crashing the game; check the
-  Releases page then. Older Minecraft builds keep working with the newest mod
-  release.
+- After a Minecraft update the log may say no build profile matches. The mod
+  validates the camera and session access against the running game. Compatible
+  changes to addresses, virtual function slots and field offsets do not require
+  a new profile. If camera validation fails, no hooks are installed. If session
+  validation fails, tracking stays disabled and the log identifies the failed
+  check. Check the Releases page for an update in that case.
 
 **No tracking response.** The game runs fine but the view does not follow your
 head.
@@ -354,15 +353,12 @@ pixi run test        # builds and runs the shared library's test suite; binds lo
 Run the launcher from the deployment folder and check
 `MinecraftHeadTracking.log` beside it.
 
-When a Minecraft update lands, both the camera's addresses and its struct
-layout are recovered from the running game at load time, so the mod runs on an
-unrecognised build without waiting for a release. A build profile records that
-the build was also checked by hand, which is what the PvP gate's offsets come
-from; until one is added the gate uses the previous build's offsets, refuses to
-allow tracking unless every read still checks out, and leaves its in-game
-notice unsent. `pixi run check-fingerprint` (with the game running) prints the
-new build's PE fingerprint, and the mod's own log prints a paste-ready profile
-stub.
+The mod resolves camera addresses and layout from the running game, then
+validates session access before allowing tracking. Function contracts ignore
+relocations and extract supported field and slot changes; incompatible function
+bodies are rejected. Unknown builds use no previous profile's session offsets.
+In-game chat notices require an exact build profile; status is also logged.
+`pixi run check-fingerprint` (with the game running) prints its PE fingerprint.
 
 ## Community & Support
 

@@ -11,10 +11,6 @@ namespace mcht::builds {
 // found instead by what they ARE - the name Bedrock bakes into its own assert
 // strings, and the ECS type hash the camera functions carry - so a patch that
 // only moves code needs no new build profile.
-//
-// Struct field offsets and vtable indices are NOT here. Those still live in the
-// build profile, because they cannot be recovered this way and, unlike code
-// addresses, they only move when a class actually gains or loses a member.
 struct ResolvedCode {
     // InGamePlayScreen::_renderLevelPrep. The anchor: found by name, and the
     // other two are found relative to it or by the same type hash it leads to.
@@ -42,10 +38,6 @@ struct ResolvedCode {
 // Recover the camera addresses from the running image, logging each step and
 // what it found. False means something was missing or ambiguous, which leaves
 // the mod dormant rather than hooking an address that merely looked plausible.
-// clientInstanceSlot is a vtable byte offset known to belong to IClientInstance
-// (the profile's Session.ClientInstanceGetLevel). It is how the component
-// getter is told apart from a function reaching the same accessor through a
-// different interface.
-bool ResolveCode(ResolvedCode& out, std::uint32_t clientInstanceSlot);
+bool ResolveCode(ResolvedCode& out);
 
 }  // namespace mcht::builds

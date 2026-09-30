@@ -66,7 +66,8 @@ test-config-lint = { cmd = "node tests/config_differential/lint-migrated.mjs bui
 test-config-files = { cmd = "./build/Release/config_tests.exe", depends-on = ["build"] }
 
 test-registry = { cmd = "./build/Release/build_registry_tests.exe", depends-on = ["build"] }
-test-unit = { cmd = "./build-tests/tests/Release/cameraunlock_tests.exe", depends-on = ["test-build", "test-mod", "test-config-files", "test-registry"] }
+test-session = { cmd = "./build/Release/session_access_tests.exe", depends-on = ["build"] }
+test-unit = { cmd = "./build-tests/tests/Release/cameraunlock_tests.exe", depends-on = ["test-build", "test-mod", "test-config-files", "test-registry", "test-session"] }
 test-differential = { depends-on = ["test-config-lint"] }
 test = { depends-on = ["test-unit", "test-differential"] }
 

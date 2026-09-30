@@ -113,6 +113,7 @@ add_library(${MOD_NAME} SHARED
     src/MinecraftHeadTracking/builds/image_scan.cpp
     src/MinecraftHeadTracking/builds/code_resolver.cpp
     src/MinecraftHeadTracking/builds/layout_resolver.cpp
+    src/MinecraftHeadTracking/builds/session_access.cpp
 )
 
 target_include_directories(${MOD_NAME} PRIVATE src src/MinecraftHeadTracking)
@@ -287,3 +288,13 @@ if(MSVC)
     target_compile_options(build_registry_tests PRIVATE /W4 /WX)
 endif()
 add_test(NAME build_registry_tests COMMAND build_registry_tests)
+
+add_executable(session_access_tests
+    tests/session_access_tests.cpp
+    src/MinecraftHeadTracking/builds/session_access.cpp
+)
+target_include_directories(session_access_tests PRIVATE src/MinecraftHeadTracking)
+if(MSVC)
+    target_compile_options(session_access_tests PRIVATE /W4 /WX)
+endif()
+add_test(NAME session_access_tests COMMAND session_access_tests)

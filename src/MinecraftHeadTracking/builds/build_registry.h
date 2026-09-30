@@ -9,25 +9,30 @@ namespace mcht::builds {
 // Result of preparing the running Minecraft.Windows.exe for hooking.
 enum class SelectResult {
     Matched,     // A profile's fingerprint matched this exact build.
-    Unresolved,  // No verified session layout or camera resolution failed.
+    Resolved,    // Camera resolved; session access still requires runtime validation.
+    Unresolved,  // Camera resolution failed.
     ReadFailed,  // Could not read the module's PE headers.
 };
 
 // Fingerprint the running game, recover the camera from the image, and pick
-// the fairness gate's layout. Runs before a single hook is installed.
+// an optional exact-build profile. Runs before a single hook is installed.
 //
-// Only Matched may install hooks. All other results leave the game unmodified.
+// Matched and Resolved may install camera hooks. Both validate session access
+// against the running implementation before tracking is allowed.
 SelectResult SelectProfile();
 
-// The fairness gate's layout. Valid after SelectProfile() returned Matched.
+// Optional exact-build metadata; unresolved fields are zero on unknown builds.
+// Valid after SelectProfile() returned Matched or Resolved.
 const BuildProfile& ActiveProfile();
 
+bool KnownBuild();
+
 // The camera addresses recovered from the running image. Valid only after
-// SelectProfile() returned Matched.
+// SelectProfile() returned Matched or Resolved.
 const ResolvedCode& ActiveCode();
 
 // The camera's struct layout, read off setupCamera's own code. Valid only
-// after SelectProfile() returned Matched.
+// after SelectProfile() returned Matched or Resolved.
 const ResolvedLayout& ActiveLayout();
 
 }  // namespace mcht::builds

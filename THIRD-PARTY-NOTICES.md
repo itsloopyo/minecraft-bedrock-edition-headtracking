@@ -185,7 +185,7 @@ affiliated with, endorsed by, or sponsored by the game's developers, its
 publishers, its engine vendor, or any other rights holder. It redistributes no
 game code, no game assets and no proprietary DLLs, and it requires a
 legitimately purchased copy of the game. Any engine structure offsets,
-function addresses or byte patterns referenced in the source were derived by
+function addresses, function hashes or byte patterns referenced in the source were derived by
 the authors through independent analysis of a legitimately owned copy. They
 are factual measurements recorded as numbers; no decompiled or disassembled
 game code is stored in this repository.

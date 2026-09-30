@@ -3,10 +3,12 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <string>
 
 #include "builds/build_registry.h"
+#include "builds/session_access.h"
 #include "cameraunlock/logging/file_log.h"
 #include "common/memory_probe.h"
 
@@ -48,12 +50,20 @@ constexpr int kAnnounceAttempts = 3;
 
 enum class Reason { NotInWorld, Settling, PvpCombat, Allowed };
 
-// The one place the active profile is reached from. Every offset this file
-// reads is a member of the same group, and naming it once keeps the reads
-// below about what they mean rather than about where they came from.
-const mcht::builds::OffsetTable::SessionGroup& Session() {
-    return mcht::builds::ActiveProfile().Offsets.Session;
-}
+struct AccessCache {
+    mcht::builds::ModuleImage Image;
+    const void* ClientVtable = nullptr;
+    const void* LevelVtable = nullptr;
+    const void* ServerVtable = nullptr;
+    mcht::builds::ClientAccess Client;
+    mcht::builds::LevelAccess Level;
+    std::uint32_t LocalServer = 0;
+    bool ClientValid = false;
+    bool LevelValid = false;
+    bool ServerValid = false;
+};
+
+AccessCache g_access;
 
 // Everything carried between polls. Grouped because leaving a world has to
 // clear all of it at once: nothing polls in menus, so a counter left standing
@@ -107,6 +117,9 @@ Fn VirtualAt(void* object, std::uint32_t byteOffset) {
 
 // Reads a pointer-sized member, or nothing when the slot is not there.
 void* MemberPointer(void* object, std::uint32_t byteOffset) {
+    if (object == nullptr) {
+        return nullptr;
+    }
     const auto slot = static_cast<unsigned char*>(object) + byteOffset;
     if (!IsReadable(slot, sizeof(void*))) {
         return nullptr;
@@ -115,7 +128,6 @@ void* MemberPointer(void* object, std::uint32_t byteOffset) {
 }
 
 using ObjectGetter = void*(__fastcall*)(void*);
-using BoolGetter = bool(__fastcall*)(void*);
 using DisplayMessageFn = void(__fastcall*)(void*, const std::string*,
                                            const std::optional<std::string>*);
 
@@ -140,7 +152,10 @@ bool CallDisplay(DisplayMessageFn display, void* localPlayer, const std::string*
 // True when the line was handed to the game. False means nothing was shown, so
 // the caller may try again on a later poll.
 bool Tell(void* localPlayer, const char* text) {
-    const auto& session = Session();
+    const auto& session = mcht::builds::ActiveProfile().Offsets.Session;
+    if (!mcht::builds::KnownBuild() || session.LocalPlayerDisplayMessage == 0) {
+        return false;
+    }
     const auto display =
         VirtualAt<DisplayMessageFn>(localPlayer, session.LocalPlayerDisplayMessage);
     if (display == nullptr) {
@@ -203,11 +218,21 @@ struct WorldHandles {
     void* ClientInstance;
     void* Level;
     void* LocalPlayer;
+    void* Data;
 };
 
-bool ResolveWorld(void* self, WorldHandles& out) {
-    const auto& offsets = mcht::builds::ActiveProfile().Offsets;
+std::optional<bool> ReadBool(void* object, std::uint32_t offset) {
+    if (object == nullptr) {
+        return std::nullopt;
+    }
+    const auto at = static_cast<const unsigned char*>(object) + offset;
+    if (!IsReadable(at, 1) || *at > 1) {
+        return std::nullopt;
+    }
+    return *at != 0;
+}
 
+bool ResolveWorld(void* self, WorldHandles& out) {
     if (self == nullptr) {
         return false;
     }
@@ -217,16 +242,49 @@ bool ResolveWorld(void* self, WorldHandles& out) {
         return false;
     }
 
-    const auto getLevel =
-        VirtualAt<ObjectGetter>(clientInstance, offsets.Session.ClientInstanceGetLevel);
-    const auto getLocalPlayer =
-        VirtualAt<ObjectGetter>(clientInstance, offsets.Session.ClientInstanceGetLocalPlayer);
-    if (getLevel == nullptr || getLocalPlayer == nullptr) {
+    const void* clientVtable = MemberPointer(clientInstance, 0);
+    if (!clientVtable) {
         return false;
     }
-
-    void* const level = getLevel(clientInstance);
-    if (level == nullptr) {
+    if (!g_access.Image.Base && !mcht::builds::MapRunningImage(g_access.Image)) {
+        return false;
+    }
+    if (clientVtable != g_access.ClientVtable) {
+        g_access.ClientVtable = clientVtable;
+        g_access.ClientValid = mcht::builds::ResolveClientAccess(
+            g_access.Image, clientVtable, g_access.Client);
+        g_access.LevelVtable = nullptr;
+        g_access.ServerVtable = nullptr;
+        cameraunlock::logging::Line("[session] client access %s.",
+            g_access.ClientValid ? "validated" : "unsupported; tracking disabled before calling game functions");
+    }
+    if (!g_access.ClientValid) {
+        return false;
+    }
+    const auto& access = g_access.Client;
+    void* owner = MemberPointer(clientInstance, access.LevelOwner);
+    void* reference = MemberPointer(owner, access.LevelReference);
+    if (ReadBool(reference, 0x28) != true || ReadBool(MemberPointer(reference, 0x30), 0) != true) {
+        return false;
+    }
+    void* level = MemberPointer(reference, 0x40);
+    const void* levelVtable = MemberPointer(level, 0);
+    if (!levelVtable) {
+        return false;
+    }
+    if (levelVtable != g_access.LevelVtable) {
+        g_access.LevelVtable = levelVtable;
+        g_access.LevelValid = mcht::builds::ResolveLevelAccess(
+            g_access.Image, levelVtable, access, g_access.Level);
+        cameraunlock::logging::Line("[session] level access %s.",
+            g_access.LevelValid ? "validated" : "unsupported; tracking disabled");
+    }
+    if (!g_access.LevelValid ||
+        ReadBool(MemberPointer(level, g_access.Level.DataReference), 0) != true) {
+        return false;
+    }
+    void* data = MemberPointer(level, g_access.Level.Data);
+    if (!data) {
         return false;
     }
 
@@ -234,25 +292,29 @@ bool ResolveWorld(void* self, WorldHandles& out) {
     // that matters for correctness rather than tidiness: before it arrives the
     // pvp rule still holds its registration default of false, so reading it
     // early would report "no PvP" and switch tracking ON in a PvP session.
+    const auto localReference = static_cast<const unsigned char*>(clientInstance) + access.LocalPlayerReference;
+    if (!IsReadable(localReference, 24)) {
+        return false;
+    }
+    const auto getLocalPlayer = reinterpret_cast<ObjectGetter>(
+        const_cast<unsigned char*>(g_access.Image.Base) + access.LocalPlayerGetter);
     void* const localPlayer = getLocalPlayer(clientInstance);
     if (localPlayer == nullptr) {
         return false;
     }
 
-    out = {clientInstance, level, localPlayer};
+    out = {clientInstance, level, localPlayer, data};
     return true;
 }
 
 // Size of the tab list, or nothing when it does not look like one. Includes
 // the local player, so a solo session reads 1.
 std::optional<std::uint64_t> ReadPlayerCount(void* level) {
-    const auto& session = Session();
-
-    void* const playerList = MemberPointer(level, session.LevelPlayerList);
+    void* const playerList = MemberPointer(level, g_access.Level.PlayerList);
     if (playerList == nullptr) {
         return std::nullopt;
     }
-    const auto sizeField = static_cast<unsigned char*>(playerList) + session.PlayerListSize;
+    const auto sizeField = static_cast<unsigned char*>(playerList) + 0x10;
     if (!IsReadable(sizeField, sizeof(std::uint64_t))) {
         return std::nullopt;
     }
@@ -264,36 +326,71 @@ std::optional<std::uint64_t> ReadPlayerCount(void* level) {
 }
 
 // The `pvp` game rule, or nothing when the rule vector does not look the way
-// this build's profile says it should.
-std::optional<bool> ReadPvpEnabled(void* level) {
-    const auto& session = Session();
+// the validated layout requires.
+std::optional<bool> ReadPvpEnabled(void* data) {
+    void* rules = static_cast<unsigned char*>(data) + g_access.Level.Rules;
+    const auto begin = static_cast<unsigned char*>(MemberPointer(rules, 0x18));
+    const auto end = reinterpret_cast<std::uintptr_t>(MemberPointer(rules, 0x20));
+    const auto start = reinterpret_cast<std::uintptr_t>(begin);
+    constexpr std::size_t stride = 0x118;
+    if (!begin || end <= start || end - start > 1024 * stride || (end - start) % stride != 0 ||
+        !IsReadable(begin, static_cast<std::size_t>(end - start))) {
+        return std::nullopt;
+    }
+    std::optional<bool> found;
+    for (std::size_t offset = 0; offset < end - start; offset += stride) {
+        const auto rule = begin + offset;
+        std::uint64_t length, capacity;
+        std::memcpy(&length, rule + 0x20, sizeof(length));
+        std::memcpy(&capacity, rule + 0x28, sizeof(capacity));
+        if (length != 3 || capacity < length) {
+            continue;
+        }
+        const auto name = capacity < 16 ? rule + 0x10 :
+            static_cast<unsigned char*>(MemberPointer(rule, 0x10));
+        if (!name || !IsReadable(name, 3) || std::memcmp(name, "pvp", 3) != 0) {
+            continue;
+        }
+        if (found.has_value() || rule[8] != kBoolVariantTag || rule[4] > 1) {
+            return std::nullopt;
+        }
+        found = rule[4] != 0;
+    }
+    return found;
+}
 
-    const auto getGameRules = VirtualAt<ObjectGetter>(level, session.LevelGetGameRules);
-    if (getGameRules == nullptr) {
+std::optional<bool> ReadRemote(const WorldHandles& world) {
+    const auto multiplayer = ReadBool(world.Data, g_access.Level.MultiplayerFlag);
+    const auto secondary = ReadBool(world.ClientInstance, g_access.Client.PrimaryFlag);
+    if (!multiplayer.has_value() || !secondary.has_value()) {
         return std::nullopt;
     }
-    void* const gameRules = getGameRules(level);
-    if (gameRules == nullptr || !IsReadable(gameRules, session.GameRulesEnd + sizeof(void*))) {
+    if (!*multiplayer) {
+        return false;
+    }
+    if (*secondary) {
+        return true;
+    }
+    void* game = MemberPointer(world.ClientInstance, g_access.Client.Game);
+    if (!game) {
         return std::nullopt;
     }
-
-    const auto rulesBytes = static_cast<unsigned char*>(gameRules);
-    const auto begin =
-        *reinterpret_cast<unsigned char* const*>(rulesBytes + session.GameRulesBegin);
-    const auto end = *reinterpret_cast<unsigned char* const*>(rulesBytes + session.GameRulesEnd);
-    if (begin == nullptr || end <= begin) {
+    auto server = static_cast<unsigned char*>(game) + g_access.Client.ServerInterface;
+    const void* vtable = MemberPointer(server, 0);
+    if (!vtable) {
         return std::nullopt;
     }
-    const std::size_t needed =
-        static_cast<std::size_t>(session.PvpRuleIndex + 1) * session.GameRuleStride;
-    if (static_cast<std::size_t>(end - begin) < needed ||
-        !IsReadable(begin + session.PvpVariantTag, 1)) {
+    if (vtable != g_access.ServerVtable) {
+        g_access.ServerVtable = vtable;
+        g_access.ServerValid = mcht::builds::ResolveServerAccess(
+            g_access.Image, vtable, g_access.Client.ServerSlot, g_access.LocalServer);
+        cameraunlock::logging::Line("[session] server access %s.",
+            g_access.ServerValid ? "validated" : "unsupported; tracking disabled");
+    }
+    if (!g_access.ServerValid || !IsReadable(server + g_access.LocalServer, sizeof(void*))) {
         return std::nullopt;
     }
-    if (begin[session.PvpVariantTag] != kBoolVariantTag) {
-        return std::nullopt;
-    }
-    return begin[session.PvpValueByte] != 0;
+    return MemberPointer(server, g_access.LocalServer) == nullptr;
 }
 
 // All three inputs are logged, not just the verdict. When the roster reads 1,
@@ -324,24 +421,24 @@ Reason Evaluate(void* self, void** outLocalPlayer) {
         return Reason::NotInWorld;
     }
 
-    const std::optional<bool> pvpEnabled = ReadPvpEnabled(world.Level);
+    const std::optional<bool> pvpEnabled = ReadPvpEnabled(world.Data);
     if (!pvpEnabled.has_value()) {
         return Reason::NotInWorld;
     }
 
     // The remote check is a second positive: its false also covers menus and a
     // LAN-hosted world, so it is never read as proof of safety on its own.
-    const auto& session = Session();
-    const auto isMultiplayer =
-        VirtualAt<BoolGetter>(world.ClientInstance, session.ClientInstanceIsMultiPlayer);
-    const bool remote = isMultiplayer != nullptr && isMultiplayer(world.ClientInstance);
+    const auto remote = ReadRemote(world);
+    if (!remote.has_value()) {
+        return Reason::NotInWorld;
+    }
 
-    LogInputsOnChange(*players, *pvpEnabled, remote);
+    LogInputsOnChange(*players, *pvpEnabled, *remote);
 
     if (!*pvpEnabled) {
         return Reason::Allowed;
     }
-    return (*players >= 2 || remote) ? Reason::PvpCombat : Reason::Allowed;
+    return (*players >= 2 || *remote) ? Reason::PvpCombat : Reason::Allowed;
 }
 
 // A fault walking the pointer chain means the world is not in the shape the
@@ -353,6 +450,12 @@ Reason EvaluateGuarded(void* self, void** outLocalPlayer) {
     __try {
         return Evaluate(self, outLocalPlayer);
     } __except (AccessViolationFilter(GetExceptionCode())) {
+        static ULONGLONG lastLog = 0;
+        const auto now = GetTickCount64();
+        if (now - lastLog >= 5000) {
+            lastLog = now;
+            cameraunlock::logging::Line("[session] game memory became unreadable; tracking disabled.");
+        }
         return Reason::NotInWorld;
     }
 }

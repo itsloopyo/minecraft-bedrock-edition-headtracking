@@ -8,6 +8,7 @@
 #include "cameraunlock/logging/file_log.h"
 #include "common/memory_probe.h"
 #include "image_scan.h"
+#include "code_contract.h"
 
 namespace mcht::builds {
 namespace {
@@ -49,19 +50,10 @@ constexpr unsigned char kCallRel32 = 0xE8;
 // small. Its callers are wrappers.
 constexpr std::uint32_t kMaxAccessorSize = 0x200;
 
-// mov rax, [rcx] ; mov rax, [rax + disp32] - loading a vtable slot from the
-// first argument, which is how a function taking an interface pointer starts.
-constexpr unsigned char kMovRaxFromRcx[] = {0x48, 0x8B, 0x01};
-constexpr unsigned char kMovRaxVtable[] = {0x48, 0x8B, 0x80};
-
-// How far into a function the vtable dispatch may sit.
-constexpr std::uint32_t kPrologueWindow = 0x40;
-
-// The IClientInstance wrapper dispatches through a slot next to the ones the
-// fairness gate already uses, which is what tells it apart from the other
-// caller of the same accessor - that one dispatches through an unrelated
-// interface, hundreds of bytes away in its vtable.
-constexpr std::uint32_t kClientInstanceSlotWindow = 0x40;
+const CodeContract kCameraGetter{408, 0x8fdcd3fffeb22d45ULL,
+    {{27, 4}, {37, 4}, {51, 4}, {63, 4}, {70, 4}, {77, 4}, {83, 4}, {88, 4},
+     {119, 4}, {131, 4}, {138, 4}, {145, 4}, {151, 4}, {156, 4}, {192, 4},
+     {229, 4}, {251, 4}, {289, 4}, {311, 4}, {328, 4}, {363, 4}, {385, 4}}};
 
 // The crosshair pair, found together by the shape below. The renderer packs a
 // hardcoded 16x16 into the rect it is about to blit, then hands that rect to
@@ -386,29 +378,7 @@ std::uint32_t FindRenderCameraAccessor(const ModuleImage& image,
     return found;
 }
 
-// The vtable slot a function dispatches through on its first argument, or zero.
-std::uint32_t DispatchSlotOf(const ModuleImage& image, const FunctionBounds& bounds) {
-    const unsigned char* const base = image.Base;
-    const std::uint32_t limit =
-        bounds.End < bounds.Begin + kPrologueWindow ? bounds.End : bounds.Begin + kPrologueWindow;
-    for (std::uint32_t rva = bounds.Begin; rva + 10 <= limit; ++rva) {
-        if (std::memcmp(base + rva, kMovRaxFromRcx, sizeof(kMovRaxFromRcx)) != 0 ||
-            std::memcmp(base + rva + 3, kMovRaxVtable, sizeof(kMovRaxVtable)) != 0) {
-            continue;
-        }
-        std::uint32_t slot = 0;
-        std::memcpy(&slot, base + rva + 6, sizeof(slot));
-        return slot;
-    }
-    return 0;
-}
-
-// The accessor's IClientInstance* wrapper, which is what the mod can actually
-// call. Its other caller reaches the same accessor through an unrelated
-// interface, so the two are told apart by which vtable they dispatch through:
-// the wrapper's slot sits beside the ones the fairness gate already uses.
-std::uint32_t FindRenderCameraGetter(const ModuleImage& image, std::uint32_t accessor,
-                                     std::uint32_t clientInstanceSlot) {
+std::uint32_t FindRenderCameraGetter(const ModuleImage& image, std::uint32_t accessor) {
     const unsigned char* const text = image.Base + image.TextRva;
     std::uint32_t found = 0;
 
@@ -427,10 +397,7 @@ std::uint32_t FindRenderCameraGetter(const ModuleImage& image, std::uint32_t acc
         if (!FunctionContaining(image, image.TextRva + i, bounds)) {
             continue;
         }
-        const std::uint32_t slot = DispatchSlotOf(image, bounds);
-        const std::uint32_t distance = slot > clientInstanceSlot ? slot - clientInstanceSlot
-                                                                 : clientInstanceSlot - slot;
-        if (slot == 0 || distance > kClientInstanceSlotWindow) {
+        if (!MatchesContract(image.Base + bounds.Begin, bounds.End - bounds.Begin, kCameraGetter)) {
             continue;
         }
         if (found != 0 && found != bounds.Begin) {
@@ -503,7 +470,7 @@ void FindCrosshairPair(const ModuleImage& image, const std::vector<std::uint32_t
     out.UiBlit = blit;
 }
 
-bool Resolve(ResolvedCode& out, std::uint32_t clientInstanceSlot) {
+bool Resolve(ResolvedCode& out) {
     ModuleImage image;
     if (!MapRunningImage(image)) {
         cameraunlock::logging::Line("Could not read Minecraft.Windows.exe section headers.");
@@ -533,7 +500,7 @@ bool Resolve(ResolvedCode& out, std::uint32_t clientInstanceSlot) {
 
     const std::uint32_t accessor = FindRenderCameraAccessor(image, flagged);
     if (accessor != 0) {
-        out.GetRenderCameraComponent = FindRenderCameraGetter(image, accessor, clientInstanceSlot);
+        out.GetRenderCameraComponent = FindRenderCameraGetter(image, accessor);
         cameraunlock::logging::Line("  render-camera accessor at 0x%08X.", accessor);
     }
     FindCrosshairPair(image, rectHits, out);
@@ -548,7 +515,7 @@ bool Resolve(ResolvedCode& out, std::uint32_t clientInstanceSlot) {
 
 }  // namespace
 
-bool ResolveCode(ResolvedCode& out, std::uint32_t clientInstanceSlot) {
+bool ResolveCode(ResolvedCode& out) {
     cameraunlock::logging::Line("Recovering camera addresses from the running image...");
     ResolvedCode resolved;
     bool ok = false;
@@ -556,7 +523,7 @@ bool ResolveCode(ResolvedCode& out, std::uint32_t clientInstanceSlot) {
     // there means the image is not the shape this reads, which is a reason to
     // stay dormant rather than to take the process down.
     __try {
-        ok = Resolve(resolved, clientInstanceSlot);
+        ok = Resolve(resolved);
     } __except (AccessViolationFilter(GetExceptionCode())) {
         cameraunlock::logging::Line("  faulted while scanning the image.");
         return false;

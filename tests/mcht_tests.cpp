@@ -617,11 +617,9 @@ void TestBuildProfile() {
     Check(mcht::builds::ProfileIsComplete(latest),
           "profile 20260829: carries every offset the mod refuses to run without");
 
-    // The diagnostic primary, and the profile an unrecognised build takes its
-    // fairness offsets from, so it has to be the newest one that names them.
     Check(mcht::builds::kKnownProfileCount == 3 &&
               mcht::builds::kKnownProfiles[0] == &latest,
-          "registry: the newest profile leads, so an unknown build adopts its offsets");
+          "registry: the newest profile leads the known-build list");
 }
 
 }  // namespace

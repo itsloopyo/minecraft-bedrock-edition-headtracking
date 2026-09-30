@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Unrecognised Minecraft builds now start with head tracking disabled instead of using an older build's offsets. This prevents the startup crash on Minecraft for Windows 1.26.5203.0. Tracking on that build requires a verified profile.
+- Fixed the crash on Minecraft for Windows 1.26.5203.0 and restored head tracking. Session access now follows validated functions and fields in the running game instead of using an older build's virtual function slots. Compatible updates can keep working without a new build profile; tracking stays disabled when the required access cannot be validated.
 
 ### Added
 
